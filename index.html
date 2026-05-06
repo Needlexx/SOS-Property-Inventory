@@ -1322,7 +1322,7 @@ select.form-control {
    ================================================================= */
 // App version — bump alongside sw.js CACHE_NAME so ASM can verify which build
 // their device is actually running (shown under the email in the user menu).
-window.APP_VERSION = 'v63';
+window.APP_VERSION = 'v64';
 const SUPABASE_URL  = 'https://nogrnsjnwypihjaeulef.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5vZ3Juc2pud3lwaWhqYWV1bGVmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MDg2MzQsImV4cCI6MjA5MTk4NDYzNH0.ZxwsWtzzKO_nUSMQpH-FpbA2-5nYH8Nu1IegcKcYjW8';
 const PHOTO_BUCKET  = 'inventory-photos';
@@ -6020,10 +6020,11 @@ function renderWarehouseOwnView() {
         : isLow
           ? `<span style="font-size:0.62rem; font-weight:800; color:#b45309; letter-spacing:0.05em; background:#fef3c7; padding:1px 5px; border-radius:4px; margin-left:4px;">LOW</span>`
           : '';
-      const itemCost  = Number(i.cost);
-      const hasCost   = !isNaN(itemCost) && itemCost > 0;
-      const costLabel = hasCost ? ` · <b style="color:#0369a1;">£${itemCost.toFixed(2)}/unit</b>` : '';
-      const lineValue = hasCost ? `<span style="font-size:0.68rem; color:#0369a1; font-weight:600; margin-left:4px;">= £${(qty * itemCost).toFixed(2)}</span>` : '';
+      const itemCost   = Number(i.cost);
+      const hasCost    = !isNaN(itemCost) && itemCost > 0;
+      const costLabel  = hasCost ? ` · <b style="color:#0369a1;">£${itemCost.toFixed(2)}</b>` : '';
+      const packLabel  = i.base_pack ? ` · <span style="color:#7c3aed;">Pk&nbsp;${i.base_pack}</span>` : '';
+      const lineValue  = hasCost ? `<div style="font-size:0.68rem; color:#0369a1; font-weight:600;">= £${(qty * itemCost).toFixed(2)}</div>` : '';
       return `
         <div style="display:grid; grid-template-columns: 8px 1fr auto auto; gap:8px; align-items:center; padding:9px 12px; border-bottom:1px solid var(--border);">
           <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:${dot}; flex-shrink:0;"></span>
@@ -6031,7 +6032,7 @@ function renderWarehouseOwnView() {
             <div style="font-weight:600; font-size:0.85rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
               ${esc(i.name)}${badge}
             </div>
-            <div style="font-size:0.7rem; color:var(--text-light);">${esc(i.product_code || '')}${i.product_code ? ' · ' : ''}${esc(i.unit || '')}${costLabel}</div>
+            <div style="font-size:0.7rem; color:var(--text-light);">${esc(i.product_code || '')}${i.product_code ? ' · ' : ''}${esc(i.unit || '')}${packLabel}${costLabel}</div>
           </div>
           <div style="text-align:right; min-width:50px;">
             <div style="font-weight:700; font-size:0.95rem; color:${isOut ? '#dc2626' : isLow ? '#b45309' : 'inherit'};">${qty}</div>
@@ -6411,13 +6412,21 @@ function openWarehouseItemModal(existing) {
       <label class="form-label">Product code (optional)</label>
       <input class="form-control" id="whItemCode" value="${existing && existing.product_code ? esc(existing.product_code) : ''}">
     </div>
-    <div class="form-group">
-      <label class="form-label">Cost per unit (£) — warehouse only, not shown to sites</label>
-      <div style="position:relative;">
-        <span style="position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--text-light); font-weight:600; pointer-events:none;">£</span>
-        <input class="form-control" type="number" inputmode="decimal" min="0" step="0.01"
-          id="whItemCost" value="${existing && existing.cost != null ? Number(existing.cost).toFixed(2) : ''}"
-          placeholder="0.00" style="padding-left:28px;">
+    <div style="display:flex; gap:8px;">
+      <div class="form-group" style="flex:1;">
+        <label class="form-label">Base pack (units per case)</label>
+        <input class="form-control" type="number" inputmode="numeric" min="1" step="1"
+          id="whItemBasePack" value="${existing && existing.base_pack ? existing.base_pack : ''}"
+          placeholder="e.g. 6">
+      </div>
+      <div class="form-group" style="flex:1;">
+        <label class="form-label">Cost per unit (£)</label>
+        <div style="position:relative;">
+          <span style="position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--text-light); font-weight:600; pointer-events:none;">£</span>
+          <input class="form-control" type="number" inputmode="decimal" min="0" step="0.01"
+            id="whItemCost" value="${existing && existing.cost != null ? Number(existing.cost).toFixed(2) : ''}"
+            placeholder="0.00" style="padding-left:28px;">
+        </div>
       </div>
     </div>
     <button class="btn btn-primary btn-block" onclick="saveWarehouseItem(${isEdit ? `'${existing.id}'` : 'null'})">
@@ -6434,20 +6443,22 @@ async function saveWarehouseItem(id) {
   const unit = document.getElementById('whItemUnit').value;
   const min_stock = Math.max(0, parseInt(document.getElementById('whItemMin').value, 10) || 0);
   const product_code = (document.getElementById('whItemCode').value || '').trim() || null;
-  const rawCost = parseFloat(document.getElementById('whItemCost').value);
-  const cost = (!isNaN(rawCost) && rawCost > 0) ? Math.round(rawCost * 100) / 100 : null;
+  const rawCost     = parseFloat(document.getElementById('whItemCost').value);
+  const cost        = (!isNaN(rawCost) && rawCost > 0) ? Math.round(rawCost * 100) / 100 : null;
+  const rawBasePack = parseInt(document.getElementById('whItemBasePack').value, 10);
+  const base_pack   = (!isNaN(rawBasePack) && rawBasePack > 0) ? rawBasePack : null;
   if (!name) { toast('Name is required', 'warning'); return; }
   const whId = getWarehouseHotelId();
   if (!whId) { toast('Warehouse hotel not configured', 'error'); return; }
   showSyncStatus('syncing');
   if (id) {
     const { error } = await sb.from('items')
-      .update({ name, category, quantity, unit, min_stock, product_code, cost })
+      .update({ name, category, quantity, unit, min_stock, product_code, cost, base_pack })
       .eq('id', id).eq('hotel_id', whId);
     if (error) { showSyncStatus('error'); toast('Save failed: ' + error.message, 'error'); return; }
   } else {
     const { error } = await sb.from('items')
-      .insert({ name, category, quantity, unit, min_stock, product_code, cost, hotel_id: whId });
+      .insert({ name, category, quantity, unit, min_stock, product_code, cost, base_pack, hotel_id: whId });
     if (error) { showSyncStatus('error'); toast('Save failed: ' + error.message, 'error'); return; }
   }
   showSyncStatus('synced');
