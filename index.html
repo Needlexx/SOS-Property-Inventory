@@ -1322,7 +1322,7 @@ select.form-control {
    ================================================================= */
 // App version — bump alongside sw.js CACHE_NAME so ASM can verify which build
 // their device is actually running (shown under the email in the user menu).
-window.APP_VERSION = 'v64';
+window.APP_VERSION = 'v65';
 const SUPABASE_URL  = 'https://nogrnsjnwypihjaeulef.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5vZ3Juc2pud3lwaWhqYWV1bGVmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MDg2MzQsImV4cCI6MjA5MTk4NDYzNH0.ZxwsWtzzKO_nUSMQpH-FpbA2-5nYH8Nu1IegcKcYjW8';
 const PHOTO_BUCKET  = 'inventory-photos';
@@ -3393,13 +3393,34 @@ async function generateAllSitesReorderZip() {
   const siteHotels = ALL_HOTELS.filter(h => h.code !== 'WAREHOUSE');
   if (siteHotels.length === 0) { toast('No site hotels found', 'warning'); return; }
 
-  toast('Building reorder ZIP — fetching all sites…', 'info');
+  toast('Building reorder ZIP — fetching costs & all sites…', 'info');
   try {
+    // --- 1. Build warehouse cost lookup (product_code → cost) ---
+    const whId = getWarehouseHotelId();
+    const { data: whItems } = await sb.from('items')
+      .select('product_code, name, cost, base_pack').eq('hotel_id', whId);
+    const norm = s => (s || '').trim().toUpperCase();
+    const whCostByCode = {};   // UPPER(product_code) → cost
+    const whCostByName = {};   // UPPER(name) → cost
+    (whItems || []).forEach(w => {
+      const c = (Number(w.cost) > 0) ? Number(w.cost) : null;
+      if (w.product_code) whCostByCode[norm(w.product_code)] = c;
+      if (w.name)         whCostByName[norm(w.name)]         = c;
+    });
+    const lookupCost = (item) => {
+      if (item.product_code) {
+        const c = whCostByCode[norm(item.product_code)];
+        if (c != null) return c;
+      }
+      return whCostByName[norm(item.name)] || null;
+    };
+
     const zip = new JSZip();
     const todayStr = new Date().toLocaleDateString('en-GB');
     const todayISO = new Date().toISOString().slice(0, 10);
     let sitesWithItems = 0;
 
+    // --- 2. One PDF per site hotel ---
     for (const hotel of siteHotels) {
       const { data: items, error } = await sb
         .from('items').select('*')
@@ -3407,15 +3428,14 @@ async function generateAllSitesReorderZip() {
         .order('category').order('name');
       if (error) throw error;
 
-      // Items at or below min stock
       const lowItems = (items || []).filter(i => {
         const qty = Number(i.quantity) || 0;
         const min = Number(i.min_stock) || 0;
         return qty <= min;
       });
 
-      // Build one PDF per hotel
-      const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+      // Landscape A4 gives enough width for 10 columns comfortably
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
 
       // Header
       doc.setFontSize(15);
@@ -3434,11 +3454,17 @@ async function generateAllSitesReorderZip() {
       } else {
         sitesWithItems++;
         let totalToOrder = 0;
+        let totalCost    = 0;
+        let hasCostData  = false;
+
         const body = lowItems.map(i => {
-          const qty   = Number(i.quantity)  || 0;
-          const max   = Number(i.max_stock) || 20;
-          const toOrd = Math.max(0, max - qty);
+          const qty    = Number(i.quantity)  || 0;
+          const max    = Number(i.max_stock) || 20;
+          const toOrd  = Math.max(0, max - qty);
+          const cost   = lookupCost(i);
+          const lineCost = (cost != null) ? toOrd * cost : null;
           totalToOrder += toOrd;
+          if (lineCost != null) { totalCost += lineCost; hasCostData = true; }
           return [
             i.product_code || '',
             i.name,
@@ -3447,39 +3473,51 @@ async function generateAllSitesReorderZip() {
             String(Number(i.min_stock) || 0),
             String(max),
             String(toOrd),
-            i.unit || 'pcs'
+            i.unit || 'pcs',
+            cost != null ? `£${cost.toFixed(2)}` : '—',
+            lineCost != null ? `£${lineCost.toFixed(2)}` : '—'
           ];
         });
-        // Summary row
-        body.push(['', '', '', '', '', 'TOTAL TO ORDER', String(totalToOrder), '']);
+
+        // Summary / totals row
+        body.push([
+          '', '', '', '', '', '',
+          'TOTAL',
+          String(totalToOrder),
+          hasCostData ? 'EST. COST' : '',
+          hasCostData ? `£${totalCost.toFixed(2)}` : ''
+        ]);
 
         doc.autoTable({
           startY: 74,
-          head: [['Code', 'Item', 'Category', 'In Stock', 'Min', 'Max', 'To Order', 'Unit']],
+          head: [['Code', 'Item', 'Category', 'In Stock', 'Min', 'Max', 'To Order', 'Unit', 'Unit Cost', 'Line Cost']],
           body,
           styles:      { fontSize: 8, cellPadding: 3 },
           headStyles:  { fillColor: [220, 38, 38] },
           columnStyles: {
-            0: { cellWidth: 50 },
+            0: { cellWidth: 52 },
             1: { cellWidth: 'auto' },
-            2: { cellWidth: 72 },
+            2: { cellWidth: 70 },
             3: { cellWidth: 44, halign: 'center' },
             4: { cellWidth: 36, halign: 'center' },
             5: { cellWidth: 36, halign: 'center' },
             6: { cellWidth: 50, halign: 'center' },
-            7: { cellWidth: 40 }
+            7: { cellWidth: 38 },
+            8: { cellWidth: 56, halign: 'right' },
+            9: { cellWidth: 62, halign: 'right' }
           },
           didDrawCell: (data) => {
-            // Highlight zero-stock cells in red
+            // Red + bold for zero in-stock cells
             if (data.section === 'body' && data.column.index === 3) {
-              if (Number(data.cell.raw) === 0) {
+              if (data.row.index < body.length - 1 && Number(data.cell.raw) === 0) {
                 data.cell.styles.textColor = [220, 38, 38];
                 data.cell.styles.fontStyle = 'bold';
               }
             }
-            // Bold the TOTAL row (last body row)
+            // Bold the totals row
             if (data.section === 'body' && data.row.index === body.length - 1) {
               data.cell.styles.fontStyle = 'bold';
+              data.cell.styles.fillColor = [245, 245, 245];
             }
           },
           didDrawPage: (data) => {
@@ -3489,13 +3527,27 @@ async function generateAllSitesReorderZip() {
             doc.setFontSize(8);
             doc.setTextColor(130);
             doc.text(`Page ${data.pageNumber} of ${pageCount}`, pageSize.width - 80, pageHeight - 16);
-            doc.text(`${hotel.name}  ·  SOS Property`, 40, pageHeight - 16);
+            doc.text(`${hotel.name}  ·  SOS Property Inventory`, 40, pageHeight - 16);
             doc.setTextColor(0);
           }
         });
+
+        // Summary box below the table
+        const finalY = doc.lastAutoTable.finalY + 14;
+        doc.setFillColor(30, 30, 30);
+        doc.roundedRect(40, finalY, 340, hasCostData ? 38 : 22, 4, 4, 'F');
+        doc.setFontSize(9);
+        doc.setTextColor(255, 255, 255);
+        doc.setFont(undefined, 'bold');
+        doc.text(`Total items to order: ${totalToOrder} units`, 52, finalY + 14);
+        if (hasCostData) {
+          doc.text(`Estimated procurement cost: £${totalCost.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 52, finalY + 29);
+        }
+        doc.setFont(undefined, 'normal');
+        doc.setTextColor(0);
       }
 
-      // Add PDF binary to ZIP
+      // Add PDF to ZIP
       const buf = doc.output('arraybuffer');
       const safeHotelName = hotel.name.replace(/[^a-z0-9]/gi, '_').replace(/__+/g, '_');
       zip.file(`${safeHotelName}_${todayISO}.pdf`, buf);
@@ -3510,7 +3562,6 @@ async function generateAllSitesReorderZip() {
     document.body.removeChild(a);
     URL.revokeObjectURL(a.href);
 
-    // Mark today so the auto-trigger doesn't re-fire this session
     save(KEYS.fridayReorderZip, today());
     checkFridayReorderZip();
     toast(`Reorder ZIP ready — ${siteHotels.length} sites (${sitesWithItems} with low stock)`, 'success');
