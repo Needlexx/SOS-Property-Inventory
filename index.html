@@ -1062,6 +1062,10 @@ select.form-control {
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>
           <span>Check for pending deliveries</span>
         </button>
+        <button class="user-menu-item" id="userMenuWelfareCount" style="display:none;" onclick="closeUserMenu(); openWelfareCountDeliveries();" role="menuitem">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2h-4"/><path d="M9 12h6M9 16h4"/></svg>
+          <span>Count incoming delivery</span>
+        </button>
         <!-- Hotel switcher — only shown for the warehouse role (e.g. James) -->
         <div class="user-menu-hotel-switch" id="userMenuHotelSwitch" style="display:none; padding:6px 14px 8px; border-top:1px solid var(--border); border-bottom:1px solid var(--border); margin:2px 0;">
           <div style="font-size:0.65rem; font-weight:700; color:var(--text-light); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px;">Active hotel</div>
@@ -1322,7 +1326,7 @@ select.form-control {
    ================================================================= */
 // App version — bump alongside sw.js CACHE_NAME so ASM can verify which build
 // their device is actually running (shown under the email in the user menu).
-window.APP_VERSION = 'v65';
+window.APP_VERSION = 'v66';
 const SUPABASE_URL  = 'https://nogrnsjnwypihjaeulef.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5vZ3Juc2pud3lwaWhqYWV1bGVmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MDg2MzQsImV4cCI6MjA5MTk4NDYzNH0.ZxwsWtzzKO_nUSMQpH-FpbA2-5nYH8Nu1IegcKcYjW8';
 const PHOTO_BUCKET  = 'inventory-photos';
@@ -1412,6 +1416,9 @@ function applyRoleUI() {
   if (checkPendingBtn) checkPendingBtn.style.display = asm ? '' : 'none';
   const checkDeliveriesBtn = document.getElementById('userMenuCheckDeliveries');
   if (checkDeliveriesBtn) checkDeliveriesBtn.style.display = asm ? '' : 'none';
+  // Welfare-only: count incoming warehouse deliveries
+  const welfareCountBtn = document.getElementById('userMenuWelfareCount');
+  if (welfareCountBtn) welfareCountBtn.style.display = (!asm && !warehouse) ? '' : 'none';
   const recordDeliveryBtn = document.getElementById('recordDeliveryBtn');
   // Welfare/ASM can record deliveries inbound to their hotel; warehouse doesn't
   // use this flow (they push outbound from the Send Delivery tab instead).
@@ -6391,6 +6398,7 @@ async function confirmSendToSite() {
     notes: notes || `Warehouse dispatch to ${targetHotel.name}`,
     summary: { totalItems: lines.length, totalUnits },
     status: 'pending',
+    source: 'warehouse',          // triggers the welfare-count step before ASM confirms
     hotel_id: targetHotelId
   };
 
@@ -6569,6 +6577,7 @@ async function submitDeliveryToASM(notes) {
     notes: notes || null,
     summary: { totalItems: lines.length, totalUnits },
     status: 'pending',
+    source: 'supplier',           // goes straight to ASM for approval (no welfare count step)
     hotel_id: getActiveHotelId()
   };
   showSyncStatus('syncing');
@@ -6603,15 +6612,29 @@ async function submitDeliveryToASM(notes) {
 }
 
 // Pull all pending delivery submissions
+// Role-aware delivery fetch:
+//  Warehouse (James): never sees site deliveries → []
+//  ASM: supplier 'pending' + warehouse 'welfare_counted' (welfare already counted these)
+//  Welfare: warehouse 'pending' only (deliveries they still need to count)
 async function pullDeliverySubmissions() {
-  const { data, error } = await sb
-    .from('deliveries')
-    .select('*')
-    .eq('hotel_id', getActiveHotelId())
-    .eq('status', 'pending')
-    .order('submitted_at', { ascending: false });
-  if (error) { console.warn('Pull pending deliveries failed:', error); return []; }
-  return data || [];
+  if (isWarehouse()) return [];
+  const hotelId = getActiveHotelId();
+  if (isASM()) {
+    // Two queries: supplier pending + warehouse welfare_counted
+    const [supRes, whRes] = await Promise.all([
+      sb.from('deliveries').select('*').eq('hotel_id', hotelId).eq('status', 'pending').eq('source', 'supplier').order('submitted_at', { ascending: false }),
+      sb.from('deliveries').select('*').eq('hotel_id', hotelId).eq('status', 'welfare_counted').eq('source', 'warehouse').order('submitted_at', { ascending: false })
+    ]);
+    // welfare_counted first (urgent — welfare already did the work)
+    return [...(whRes.data || []), ...(supRes.data || [])];
+  } else {
+    // Welfare: warehouse deliveries waiting to be counted
+    const { data, error } = await sb.from('deliveries').select('*')
+      .eq('hotel_id', hotelId).eq('status', 'pending').eq('source', 'warehouse')
+      .order('submitted_at', { ascending: false });
+    if (error) { console.warn('Pull welfare deliveries failed:', error); return []; }
+    return data || [];
+  }
 }
 
 async function getDeliverySubmission(id) {
@@ -6681,7 +6704,8 @@ async function applyDeliverySubmission(id) {
   try {
     const sub = await getDeliverySubmission(id);
     if (!sub) { toast('Delivery not found', 'error'); return; }
-    if (sub.status !== 'pending') {
+    const validForApply = sub.status === 'pending' || sub.status === 'welfare_counted';
+    if (!validForApply) {
       toast('This delivery has already been processed', 'warning');
       await refreshPendingDeliveriesBanner();
       closeModal();
@@ -6689,7 +6713,11 @@ async function applyDeliverySubmission(id) {
       if (remaining.length) setTimeout(() => openPendingDeliveries(), 250);
       return;
     }
-    const lines = sub.items || [];
+    // For warehouse dispatches use the welfare-counted quantities (what actually arrived);
+    // for supplier deliveries use the original submitted items.
+    const lines = (sub.source === 'warehouse' && sub.received_items && sub.received_items.length)
+      ? sub.received_items
+      : (sub.items || []);
     const allItems = getItems();
     const affected = [];
     lines.forEach(l => {
@@ -6760,44 +6788,243 @@ async function dismissDeliverySubmission(id) {
   await finishDeliveryAndContinue('Delivery dismissed');
 }
 
-async function openPendingDeliveries() {
-  if (!requireASM('Only ASM can review pending deliveries')) return;
-  const list = await pullDeliverySubmissions();
+/* ------------------------------------------------------------------
+   WELFARE DELIVERY COUNT
+   Welfare sees pending warehouse dispatches, enters how many of each
+   item they actually received, then submits to ASM for confirmation.
+   ------------------------------------------------------------------ */
+let _welfareCntDraft = {};        // itemId → received qty entered by welfare
+let _welfareCntDeliveryId = null; // delivery being counted
+
+async function openWelfareCountDeliveries() {
+  const list = await pullDeliverySubmissions();  // returns warehouse pending for welfare
   if (!list.length) {
-    toast('No pending deliveries', 'success');
+    toast('No warehouse deliveries waiting to be counted', 'success');
     refreshPendingDeliveriesBanner();
     return;
   }
   const cards = list.map(s => {
-    const when = new Date(s.submitted_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
-    const lines = s.items || [];
-    const totalUnits = (s.summary && s.summary.totalUnits) || lines.reduce((sum, l) => sum + (Number(l.qty) || 0), 0);
+    const when       = new Date(s.submitted_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+    const lines      = s.items || [];
+    const totalUnits = lines.reduce((sum, l) => sum + (Number(l.qty) || 0), 0);
     return `
-      <div class="submission-card">
+      <div class="submission-card" style="border-left:3px solid #7c3aed;">
         <div class="head">
           <div>
-            <div class="who">${esc(s.submitted_by || 'unknown')}</div>
+            <div class="who" style="color:#7c3aed;">&#128230; From Warehouse</div>
             <div class="when">${when}</div>
           </div>
         </div>
         <div class="stats">
           <span><b>${lines.length}</b> item${lines.length !== 1 ? 's' : ''}</span>
-          <span><b>${totalUnits}</b> unit${totalUnits !== 1 ? 's' : ''}</span>
+          <span><b>${totalUnits}</b> unit${totalUnits !== 1 ? 's' : ''} sent</span>
         </div>
         ${s.notes ? `<div style="font-size:0.76rem; color:var(--text-light); margin:4px 0 8px; font-style:italic;">&ldquo;${esc(s.notes)}&rdquo;</div>` : ''}
         <div class="actions">
-          <button class="btn btn-primary" onclick="reviewDelivery('${s.id}')">Review &amp; Apply</button>
-          <button class="btn btn-outline" onclick="dismissDeliverySubmission('${s.id}')">Dismiss</button>
+          <button class="btn btn-primary" style="background:#7c3aed; border-color:#7c3aed;" onclick="openWelfareCountEntry('${s.id}')">Count Items Received</button>
         </div>
       </div>`;
   }).join('');
   openModal(`
     <div class="modal-header">
-      <h3>Pending Deliveries</h3>
+      <h3>Count Incoming Deliveries</h3>
       <button class="modal-close" onclick="closeModal()">&times;</button>
     </div>
     <p style="font-size:0.82rem; color:var(--text-light); margin-bottom:12px;">
-      ${list.length} delivery${list.length !== 1 ? ' submissions' : ''} waiting for approval. Approved quantities are <b>added</b> to stock.
+      ${list.length} warehouse deliver${list.length !== 1 ? 'ies' : 'y'} arrived. Count what you actually received — the ASM will then confirm.
+    </p>
+    ${cards}
+  `);
+}
+
+async function openWelfareCountEntry(deliveryId) {
+  _welfareCntDeliveryId = deliveryId;
+  _welfareCntDraft = {};
+  // Fetch the delivery
+  const sub = await getDeliverySubmission(deliveryId);
+  if (!sub) { toast('Could not load delivery', 'error'); return; }
+  if (sub.status !== 'pending') {
+    toast('This delivery has already been counted', 'warning');
+    openWelfareCountDeliveries();
+    return;
+  }
+  const sentLines = sub.items || [];
+  // Default received = sent qty for each item
+  sentLines.forEach(l => { _welfareCntDraft[l.id || l.name] = Number(l.qty) || 0; });
+  renderWelfareCountEntry(sub);
+}
+
+function renderWelfareCountEntry(sub) {
+  const sentLines = sub.items || [];
+  const when = new Date(sub.submitted_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+  const totalSent = sentLines.reduce((s, l) => s + (Number(l.qty) || 0), 0);
+  const totalCounted = Object.values(_welfareCntDraft).reduce((s, v) => s + (Number(v) || 0), 0);
+
+  const rowHtml = (l) => {
+    const key   = l.id || l.name;
+    const sent  = Number(l.qty) || 0;
+    const recv  = _welfareCntDraft[key] != null ? _welfareCntDraft[key] : sent;
+    const diff  = recv - sent;
+    const col   = diff < 0 ? '#dc2626' : diff > 0 ? '#f59e0b' : '#16a34a';
+    const diffTxt = diff === 0 ? '' : ` <span style="color:${col}; font-size:0.7rem; font-weight:700;">(${diff > 0 ? '+' : ''}${diff})</span>`;
+    return `
+      <div style="display:grid; grid-template-columns:1fr 80px 60px; gap:8px; align-items:center; padding:9px 12px; border-bottom:1px solid var(--border);">
+        <div style="min-width:0;">
+          <div style="font-weight:600; font-size:0.85rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(l.name)}</div>
+          <div style="font-size:0.72rem; color:var(--text-light);">Sent: <b>${sent}</b> ${esc(l.unit || 'units')}${diffTxt}</div>
+        </div>
+        <input type="number" inputmode="numeric" min="0" step="1" value="${recv}"
+          data-key="${esc(key)}"
+          oninput="welfareCountUpdate('${esc(key)}', this.value)"
+          style="padding:6px 8px; text-align:right; border:1px solid var(--border); border-radius:6px; font-size:0.9rem; width:100%;">
+        <span style="font-size:0.7rem; color:var(--text-light); text-align:center;">recv</span>
+      </div>`;
+  };
+
+  openModal(`
+    <div class="modal-header">
+      <h3>Count Received Items</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 10px; margin-bottom:10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; font-size:0.8rem;">
+      <span style="color:var(--text-light);">Warehouse dispatch</span>
+      <span style="font-weight:600;">${when}</span>
+    </div>
+    <p style="font-size:0.8rem; color:var(--text-light); margin-bottom:10px; line-height:1.5;">
+      Check what arrived and adjust the quantity if anything is missing or short. The ASM will review your count.
+    </p>
+    <div style="max-height:50vh; overflow:auto; border:1px solid var(--border); border-radius:8px; margin-bottom:10px;">
+      ${sentLines.map(rowHtml).join('')}
+    </div>
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 2px; font-size:0.82rem; margin-bottom:10px;">
+      <span style="color:var(--text-light);">Sent <b style="color:var(--text);">${totalSent}</b> · Counted <b style="color:var(--text);">${totalCounted}</b></span>
+      ${totalCounted !== totalSent ? `<span style="color:${totalCounted < totalSent ? '#dc2626' : '#f59e0b'}; font-size:0.78rem; font-weight:600;">${totalCounted < totalSent ? totalSent - totalCounted + ' units missing' : totalCounted - totalSent + ' units extra'}</span>` : '<span style="color:#16a34a; font-size:0.78rem; font-weight:600;">✓ All accounted for</span>'}
+    </div>
+    <button class="btn btn-primary btn-block" style="background:#7c3aed; border-color:#7c3aed;" id="welfareSubmitBtn" onclick="submitWelfareCount()">
+      Submit Count to ASM
+    </button>
+  `);
+}
+
+function welfareCountUpdate(key, val) {
+  const n = Math.max(0, parseInt(val, 10) || 0);
+  _welfareCntDraft[key] = n;
+  // Live-update totals without full re-render
+  const sub = { items: [] };  // lightweight - just update summary text
+}
+
+async function submitWelfareCount() {
+  const btn = document.getElementById('welfareSubmitBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Submitting…'; }
+  try {
+    const sub = await getDeliverySubmission(_welfareCntDeliveryId);
+    if (!sub) throw new Error('Delivery not found');
+    const sentLines = sub.items || [];
+    // Build received_items using the draft values, keeping all item metadata
+    const receivedItems = sentLines.map(l => {
+      const key = l.id || l.name;
+      const qty = (_welfareCntDraft[key] != null) ? Number(_welfareCntDraft[key]) : Number(l.qty);
+      return { ...l, qty };
+    }).filter(l => l.qty >= 0);  // keep zero-qty items so ASM sees what arrived
+
+    const { error } = await sb.from('deliveries')
+      .update({
+        status:         'welfare_counted',
+        received_items: receivedItems,
+        counted_by:     (currentUser && currentUser.email) || 'welfare',
+        counted_at:     new Date().toISOString()
+      })
+      .eq('id', _welfareCntDeliveryId)
+      .eq('hotel_id', getActiveHotelId());
+
+    if (error) throw error;
+
+    _welfareCntDraft = {};
+    _welfareCntDeliveryId = null;
+    closeModal();
+    const totalCounted = receivedItems.reduce((s, l) => s + (Number(l.qty) || 0), 0);
+    toast(`Count submitted (${totalCounted} units) — waiting for ASM confirmation`, 'success');
+    await refreshPendingDeliveriesBanner();
+
+    // Check if more to count
+    const remaining = await pullDeliverySubmissions();
+    if (remaining.length) setTimeout(() => openWelfareCountDeliveries(), 600);
+  } catch(e) {
+    console.error('[welfare count] submit failed:', e);
+    toast('Could not submit count: ' + (e.message || e), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Submit Count to ASM'; }
+  }
+}
+
+async function openPendingDeliveries() {
+  if (!requireASM('Only ASM can review pending deliveries')) return;
+  const list = await pullDeliverySubmissions();
+  if (!list.length) {
+    toast('No deliveries to process', 'success');
+    refreshPendingDeliveriesBanner();
+    return;
+  }
+  const cards = list.map(s => {
+    const when    = new Date(s.submitted_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+    const lines   = s.items || [];
+    const isWH    = s.source === 'warehouse' && s.status === 'welfare_counted';
+    const totalSent     = (s.summary && s.summary.totalUnits) || lines.reduce((sum, l) => sum + (Number(l.qty) || 0), 0);
+    const recItems      = s.received_items || [];
+    const totalReceived = recItems.reduce((sum, l) => sum + (Number(l.qty) || 0), 0);
+    const countedWhen   = s.counted_at ? new Date(s.counted_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : '';
+
+    if (isWH) {
+      return `
+        <div class="submission-card" style="border-left:3px solid #7c3aed;">
+          <div class="head">
+            <div>
+              <div class="who" style="color:#7c3aed;">&#128230; Warehouse dispatch</div>
+              <div class="when">Sent: ${when}</div>
+            </div>
+            <span style="background:#7c3aed22; color:#7c3aed; padding:3px 8px; border-radius:12px; font-size:0.7rem; font-weight:700;">Counted by Welfare</span>
+          </div>
+          <div class="stats">
+            <span>Sent <b>${totalSent}</b> units</span>
+            <span>Counted <b>${totalReceived}</b> units</span>
+            <span>${recItems.length} item${recItems.length !== 1 ? 's' : ''}</span>
+          </div>
+          <div style="font-size:0.76rem; color:var(--text-light); margin:4px 0 8px;">
+            Counted by <b>${esc(s.counted_by || 'welfare')}</b>${countedWhen ? ' on ' + countedWhen : ''}
+          </div>
+          ${s.notes ? `<div style="font-size:0.76rem; color:var(--text-light); margin:4px 0 8px; font-style:italic;">&ldquo;${esc(s.notes)}&rdquo;</div>` : ''}
+          <div class="actions">
+            <button class="btn btn-primary" style="background:#7c3aed; border-color:#7c3aed;" onclick="reviewDelivery('${s.id}')">Review Count &amp; Confirm</button>
+            <button class="btn btn-outline" onclick="dismissDeliverySubmission('${s.id}')">Dismiss</button>
+          </div>
+        </div>`;
+    } else {
+      return `
+        <div class="submission-card">
+          <div class="head">
+            <div>
+              <div class="who">${esc(s.submitted_by || 'unknown')}</div>
+              <div class="when">${when}</div>
+            </div>
+          </div>
+          <div class="stats">
+            <span><b>${lines.length}</b> item${lines.length !== 1 ? 's' : ''}</span>
+            <span><b>${totalSent}</b> unit${totalSent !== 1 ? 's' : ''}</span>
+          </div>
+          ${s.notes ? `<div style="font-size:0.76rem; color:var(--text-light); margin:4px 0 8px; font-style:italic;">&ldquo;${esc(s.notes)}&rdquo;</div>` : ''}
+          <div class="actions">
+            <button class="btn btn-primary" onclick="reviewDelivery('${s.id}')">Review &amp; Apply</button>
+            <button class="btn btn-outline" onclick="dismissDeliverySubmission('${s.id}')">Dismiss</button>
+          </div>
+        </div>`;
+    }
+  }).join('');
+  openModal(`
+    <div class="modal-header">
+      <h3>Deliveries to Process</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <p style="font-size:0.82rem; color:var(--text-light); margin-bottom:12px;">
+      ${list.length} deliver${list.length !== 1 ? 'ies' : 'y'} waiting. Confirmed quantities are <b>added</b> to stock.
     </p>
     ${cards}
   `);
@@ -6827,68 +7054,125 @@ async function reviewDelivery(id) {
     setTimeout(() => openPendingDeliveries(), 250);
     return;
   }
-  if (sub.status !== 'pending') {
+  const isWelfareCount = sub.source === 'warehouse' && sub.status === 'welfare_counted';
+  const validStatuses = isWelfareCount ? ['welfare_counted'] : ['pending'];
+  if (!validStatuses.includes(sub.status)) {
     toast(`This delivery was already ${sub.status}`, 'warning');
     closeModal();
     await refreshPendingDeliveriesBanner();
     setTimeout(() => openPendingDeliveries(), 250);
     return;
   }
-  const lines = sub.items || [];
-  const allItems = getItems();
-  const submitter = esc(sub.submitted_by || 'unknown');
-  const when = new Date(sub.submitted_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
-  const totalUnits = (sub.summary && sub.summary.totalUnits) || lines.reduce((sum, l) => sum + (Number(l.qty) || 0), 0);
 
-  const rowHtml = (l) => {
-    const found = allItems.find(x => x.id === l.id);
-    const currentStock = found ? (Number(found.quantity) || 0) : null;
-    const add = Number(l.qty) || 0;
-    const missing = !found;
-    const newTotal = currentStock !== null ? currentStock + add : null;
-    return `
-      <div class="var-item-row">
-        <span class="nm">${esc(l.name)}${missing ? ' <span style="color:#ef4444; font-size:0.7rem;">(not in inventory)</span>' : ''}</span>
-        <span class="delta pos">+${add}</span>
-        <span class="pct ${missing ? '' : 'pos'}">${missing ? '—' : `${currentStock} → <b>${newTotal}</b>`}</span>
+  const sentLines  = sub.items || [];
+  const recLines   = sub.received_items || sentLines;   // fall back to sent if no count yet
+  const allItems   = getItems();
+  const when       = new Date(sub.submitted_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+  const totalSent  = sentLines.reduce((s, l) => s + (Number(l.qty) || 0), 0);
+  const totalRecv  = recLines.reduce((s, l) => s + (Number(l.qty) || 0), 0);
+
+  let bodyHtml;
+
+  if (isWelfareCount) {
+    // ── Welfare-count view: show Sent vs Received comparison ──
+    const countedWhen = sub.counted_at
+      ? new Date(sub.counted_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : '';
+    const discrepancies = recLines.filter(r => {
+      const s = sentLines.find(x => x.id === r.id || (x.product_code && x.product_code === r.product_code) || x.name === r.name);
+      return s && Number(r.qty) !== Number(s.qty);
+    }).length;
+
+    const compRow = (r) => {
+      const s    = sentLines.find(x => x.id === r.id || (x.product_code && x.product_code === r.product_code) || x.name === r.name);
+      const sent = s ? Number(s.qty) : '—';
+      const recv = Number(r.qty);
+      const diff = (typeof sent === 'number') ? recv - sent : null;
+      const diffCol = diff === null ? '' : diff < 0 ? '#dc2626' : diff > 0 ? '#f59e0b' : '#16a34a';
+      const diffTxt = diff === null ? '—' : diff === 0 ? '✓' : (diff > 0 ? '+' : '') + diff;
+      const found   = allItems.find(x => x.id === r.id) ||
+                      allItems.find(x => x.product_code && s && x.product_code === s.product_code) ||
+                      allItems.find(x => x.name === r.name);
+      const curStock = found ? Number(found.quantity) : null;
+      const newStock = curStock !== null ? curStock + recv : null;
+      return `
+        <div style="display:grid; grid-template-columns: 1fr 44px 44px 44px 80px; gap:4px; align-items:center; padding:8px 10px; border-bottom:1px solid var(--border); font-size:0.8rem;">
+          <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(r.name)}</span>
+          <span style="text-align:center; color:var(--text-light);">${sent}</span>
+          <span style="text-align:center; font-weight:700; color:${diff !== null && diff < 0 ? '#dc2626' : 'inherit'};">${recv}</span>
+          <span style="text-align:center; font-weight:700; color:${diffCol};">${diffTxt}</span>
+          <span style="text-align:right; font-size:0.72rem; color:var(--text-light);">${newStock !== null ? `→ ${newStock}` : '—'}</span>
+        </div>`;
+    };
+
+    bodyHtml = `
+      <div class="var-report-date" style="color:#7c3aed;">
+        &#128230; Warehouse dispatch &middot; ${when}
+      </div>
+      <div style="font-size:0.78rem; color:var(--text-light); margin:4px 0 10px;">
+        Counted by <b>${esc(sub.counted_by || 'welfare')}</b>${countedWhen ? ' on ' + countedWhen : ''}
+      </div>
+      ${sub.notes ? `<div style="background:var(--bg); padding:10px 12px; border-radius:8px; font-size:0.82rem; color:var(--text); margin:0 0 10px; border-left:3px solid #7c3aed;">${esc(sub.notes)}</div>` : ''}
+      <div class="var-kpi-grid">
+        <div class="var-kpi good"><div class="var-kpi-val">${totalSent}</div><div class="var-kpi-lbl">Units sent</div></div>
+        <div class="var-kpi ${totalRecv < totalSent ? 'neg' : 'good'}"><div class="var-kpi-val">${totalRecv}</div><div class="var-kpi-lbl">Units received</div></div>
+        <div class="var-kpi ${discrepancies > 0 ? 'neg' : 'good'}"><div class="var-kpi-val">${discrepancies}</div><div class="var-kpi-lbl">Discrepancies</div></div>
+      </div>
+      <div style="display:grid; grid-template-columns: 1fr 44px 44px 44px 80px; gap:4px; padding:6px 10px; font-size:0.68rem; font-weight:700; color:var(--text-light); text-transform:uppercase; letter-spacing:0.04em;">
+        <span>Item</span><span style="text-align:center;">Sent</span><span style="text-align:center;">Recv'd</span><span style="text-align:center;">Diff</span><span style="text-align:right;">New stock</span>
+      </div>
+      ${recLines.map(compRow).join('')}
+      <div style="display:flex; gap:8px; margin-top:18px;">
+        <button class="btn btn-outline" style="flex:1;" onclick="openPendingDeliveries()">Back</button>
+        <button class="btn btn-danger" id="delivDismissBtn" onclick="handleDeliveryDismiss('${sub.id}')">Dismiss</button>
+        <button class="btn btn-primary" style="flex:1; background:#7c3aed; border-color:#7c3aed;" id="delivApplyBtn" onclick="handleDeliveryApply('${sub.id}')">Confirm &amp; Add to Stock</button>
       </div>`;
-  };
-
-  const missingCount = lines.filter(l => !allItems.find(x => x.id === l.id)).length;
+  } else {
+    // ── Standard supplier delivery view (no welfare count) ──
+    const missingCount = sentLines.filter(l => {
+      const f = allItems.find(x => x.id === l.id);
+      const f2 = !f && l.product_code ? allItems.find(x => x.product_code && x.product_code.toLowerCase() === l.product_code.toLowerCase()) : null;
+      const f3 = (!f && !f2) ? allItems.find(x => (x.name||'').toLowerCase() === (l.name||'').toLowerCase()) : null;
+      return !f && !f2 && !f3;
+    }).length;
+    const rowHtml = (l) => {
+      let found = allItems.find(x => x.id === l.id);
+      if (!found && l.product_code) found = allItems.find(x => x.product_code && x.product_code.toLowerCase() === l.product_code.toLowerCase());
+      if (!found) found = allItems.find(x => (x.name||'').toLowerCase() === (l.name||'').toLowerCase());
+      const curStock = found ? (Number(found.quantity) || 0) : null;
+      const add = Number(l.qty) || 0;
+      const newTotal = curStock !== null ? curStock + add : null;
+      return `
+        <div class="var-item-row">
+          <span class="nm">${esc(l.name)}${!found ? ' <span style="color:#ef4444; font-size:0.7rem;">(not in inventory)</span>' : ''}</span>
+          <span class="delta pos">+${add}</span>
+          <span class="pct ${!found ? '' : 'pos'}">${!found ? '—' : `${curStock} → <b>${newTotal}</b>`}</span>
+        </div>`;
+    };
+    bodyHtml = `
+      <div class="var-report-date">
+        From <b style="color:var(--text);">${esc(sub.submitted_by || 'unknown')}</b> &middot; ${when} &middot; ${sentLines.length} item${sentLines.length !== 1 ? 's' : ''}
+      </div>
+      ${sub.notes ? `<div style="background:var(--bg); padding:10px 12px; border-radius:8px; font-size:0.82rem; color:var(--text); margin:10px 0; border-left:3px solid var(--primary);">${esc(sub.notes)}</div>` : ''}
+      <div class="var-kpi-grid">
+        <div class="var-kpi good"><div class="var-kpi-val">+${totalSent}</div><div class="var-kpi-lbl">Units delivered</div></div>
+        <div class="var-kpi"><div class="var-kpi-val">${sentLines.length}</div><div class="var-kpi-lbl">Items</div></div>
+        <div class="var-kpi ${missingCount > 0 ? 'neg' : 'good'}"><div class="var-kpi-val">${missingCount}</div><div class="var-kpi-lbl">Not in inventory</div></div>
+      </div>
+      <div class="var-section-title">All delivered items</div>
+      ${sentLines.map(rowHtml).join('')}
+      <div style="display:flex; gap:8px; margin-top:18px;">
+        <button class="btn btn-outline" style="flex:1;" onclick="openPendingDeliveries()">Back</button>
+        <button class="btn btn-danger" id="delivDismissBtn" onclick="handleDeliveryDismiss('${sub.id}')">Dismiss</button>
+        <button class="btn btn-warning" style="flex:1;" id="delivApplyBtn" onclick="handleDeliveryApply('${sub.id}')">Add to Stock</button>
+      </div>`;
+  }
 
   openModal(`
     <div class="modal-header">
-      <h3>Review Delivery</h3>
+      <h3>${isWelfareCount ? 'Review Welfare Count' : 'Review Delivery'}</h3>
       <button class="modal-close" onclick="closeModal()">&times;</button>
     </div>
-    <div class="var-report-date">
-      From <b style="color:var(--text);">${submitter}</b> &middot; ${when} &middot; ${lines.length} item${lines.length !== 1 ? 's' : ''}
-    </div>
-    ${sub.notes ? `<div style="background:var(--bg); padding:10px 12px; border-radius:8px; font-size:0.82rem; color:var(--text); margin:10px 0; border-left:3px solid var(--primary);">${esc(sub.notes)}</div>` : ''}
-
-    <div class="var-kpi-grid">
-      <div class="var-kpi good">
-        <div class="var-kpi-val">+${totalUnits}</div>
-        <div class="var-kpi-lbl">Units delivered</div>
-      </div>
-      <div class="var-kpi">
-        <div class="var-kpi-val">${lines.length}</div>
-        <div class="var-kpi-lbl">Items</div>
-      </div>
-      <div class="var-kpi ${missingCount > 0 ? 'neg' : 'good'}">
-        <div class="var-kpi-val">${missingCount}</div>
-        <div class="var-kpi-lbl">Not in inventory</div>
-      </div>
-    </div>
-
-    <div class="var-section-title">All delivered items</div>
-    ${lines.map(rowHtml).join('')}
-
-    <div style="display:flex; gap:8px; margin-top:18px;">
-      <button class="btn btn-outline" style="flex:1;" onclick="openPendingDeliveries()">Back</button>
-      <button class="btn btn-danger" id="delivDismissBtn" onclick="handleDeliveryDismiss('${sub.id}')">Dismiss</button>
-      <button class="btn btn-warning" style="flex:1;" id="delivApplyBtn" onclick="handleDeliveryApply('${sub.id}')">Add to Stock</button>
-    </div>
+    ${bodyHtml}
   `);
 }
 
@@ -6925,44 +7209,56 @@ async function handleDeliveryDismiss(id) {
 // Updates the delivery banner on the Stock tab AND the red badge on the Stock
 // nav button (visible from any tab). ASM only.
 async function refreshPendingDeliveriesBanner() {
-  const el = document.getElementById('pendingDeliveriesBanner');
+  const el    = document.getElementById('pendingDeliveriesBanner');
   const badge = document.getElementById('stockTabBadge');
   const setBadge = (n) => {
     if (!badge) return;
-    if (n > 0) {
-      badge.textContent = n > 9 ? '9+' : String(n);
-      badge.classList.add('show');
-    } else {
-      badge.classList.remove('show');
-    }
+    if (n > 0) { badge.textContent = n > 9 ? '9+' : String(n); badge.classList.add('show'); }
+    else        { badge.classList.remove('show'); }
   };
-  if (!isASM()) {
+
+  // Warehouse (James) never sees site delivery banners
+  if (isWarehouse()) {
     if (el) { el.style.display = 'none'; el.innerHTML = ''; }
     setBadge(0);
     return;
   }
+
   const list = await pullDeliverySubmissions();
   setBadge(list.length);
   if (!el) return;
-  if (!list.length) {
-    el.style.display = 'none';
-    el.innerHTML = '';
-    return;
+  if (!list.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+
+  if (isASM()) {
+    // Distinguish how many are welfare-counted warehouse vs raw supplier pending
+    const whCounted  = list.filter(d => d.source === 'warehouse' && d.status === 'welfare_counted');
+    const supPending = list.filter(d => d.source === 'supplier'  && d.status === 'pending');
+    const parts = [];
+    if (whCounted.length)  parts.push(`${whCounted.length} warehouse count${whCounted.length !== 1 ? 's' : ''} ready`);
+    if (supPending.length) parts.push(`${supPending.length} supplier deliver${supPending.length !== 1 ? 'ies' : 'y'}`);
+    el.style.display = 'block';
+    el.innerHTML = `
+      <div class="pending-banner" onclick="openPendingDeliveries()" style="cursor:pointer; background:linear-gradient(135deg,#10b98122,#10b98108); border-left:4px solid #10b981;">
+        <div class="pending-banner-icon" style="background:#10b981;">📦</div>
+        <div class="pending-banner-text">
+          <div class="pending-banner-title">${list.length} deliver${list.length !== 1 ? 'ies' : 'y'} to process</div>
+          <div class="pending-banner-sub">${parts.join(' · ')} — tap to review</div>
+        </div>
+        <div class="pending-banner-arrow">&rsaquo;</div>
+      </div>`;
+  } else {
+    // Welfare: show banner for warehouse deliveries they need to count
+    el.style.display = 'block';
+    el.innerHTML = `
+      <div class="pending-banner" onclick="openWelfareCountDeliveries()" style="cursor:pointer; background:linear-gradient(135deg,#6d28d922,#6d28d908); border-left:4px solid #7c3aed;">
+        <div class="pending-banner-icon" style="background:#7c3aed;">📋</div>
+        <div class="pending-banner-text">
+          <div class="pending-banner-title">${list.length} warehouse deliver${list.length !== 1 ? 'ies' : 'y'} to count</div>
+          <div class="pending-banner-sub">Tap to count what you received — ASM will then confirm</div>
+        </div>
+        <div class="pending-banner-arrow">&rsaquo;</div>
+      </div>`;
   }
-  const latest = list[0];
-  const fromWho = esc(latest.submitted_by || 'staff');
-  const totalUnits = (latest.summary && latest.summary.totalUnits) || (latest.items || []).reduce((s, l) => s + (Number(l.qty) || 0), 0);
-  el.style.display = 'block';
-  el.innerHTML = `
-    <div class="pending-banner" onclick="openPendingDeliveries()" style="cursor:pointer; background:linear-gradient(135deg, #10b98122, #10b98108); border-left:4px solid #10b981;">
-      <div class="pending-banner-icon" style="background:#10b981;">📦</div>
-      <div class="pending-banner-text">
-        <div class="pending-banner-title">${list.length} pending deliver${list.length !== 1 ? 'ies' : 'y'}</div>
-        <div class="pending-banner-sub">Latest: +${totalUnits} units from ${fromWho} — tap to review</div>
-      </div>
-      <div class="pending-banner-arrow">&rsaquo;</div>
-    </div>
-  `;
 }
 
 async function asmCheckForDeliveries() {
