@@ -1326,7 +1326,7 @@ select.form-control {
    ================================================================= */
 // App version — bump alongside sw.js CACHE_NAME so ASM can verify which build
 // their device is actually running (shown under the email in the user menu).
-window.APP_VERSION = 'v68';
+window.APP_VERSION = 'v69';
 const SUPABASE_URL  = 'https://nogrnsjnwypihjaeulef.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5vZ3Juc2pud3lwaWhqYWV1bGVmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MDg2MzQsImV4cCI6MjA5MTk4NDYzNH0.ZxwsWtzzKO_nUSMQpH-FpbA2-5nYH8Nu1IegcKcYjW8';
 const PHOTO_BUCKET  = 'inventory-photos';
@@ -5715,6 +5715,7 @@ async function sendWarehouseDelivery(targetHotelId) {
     notes: 'Shipment from warehouse',
     summary: { totalItems: fullLines.length, totalUnits },
     status: 'pending',
+    source: 'warehouse',
     hotel_id: targetHotelId
   };
   showSyncStatus('syncing');
@@ -6614,19 +6615,20 @@ async function submitDeliveryToASM(notes) {
 // Pull all pending delivery submissions
 // Role-aware delivery fetch:
 //  Warehouse (James): never sees site deliveries → []
-//  ASM: supplier 'pending' + warehouse 'welfare_counted' (welfare already counted these)
+//  ASM: warehouse 'welfare_counted' (ready to confirm) + warehouse 'pending' (info: waiting for welfare) + supplier 'pending'
 //  Welfare: warehouse 'pending' only (deliveries they still need to count)
 async function pullDeliverySubmissions() {
   if (isWarehouse()) return [];
   const hotelId = getActiveHotelId();
   if (isASM()) {
-    // Two queries: supplier pending + warehouse welfare_counted
-    const [supRes, whRes] = await Promise.all([
+    // Three queries: welfare-counted warehouse + pending warehouse (info only) + supplier pending
+    const [supRes, whCountedRes, whPendingRes] = await Promise.all([
       sb.from('deliveries').select('*').eq('hotel_id', hotelId).eq('status', 'pending').eq('source', 'supplier').order('submitted_at', { ascending: false }),
-      sb.from('deliveries').select('*').eq('hotel_id', hotelId).eq('status', 'welfare_counted').eq('source', 'warehouse').order('submitted_at', { ascending: false })
+      sb.from('deliveries').select('*').eq('hotel_id', hotelId).eq('status', 'welfare_counted').eq('source', 'warehouse').order('submitted_at', { ascending: false }),
+      sb.from('deliveries').select('*').eq('hotel_id', hotelId).eq('status', 'pending').eq('source', 'warehouse').order('submitted_at', { ascending: false })
     ]);
-    // welfare_counted first (urgent — welfare already did the work)
-    return [...(whRes.data || []), ...(supRes.data || [])];
+    // welfare_counted first (actionable), then pending-warehouse (info), then supplier pending
+    return [...(whCountedRes.data || []), ...(whPendingRes.data || []), ...(supRes.data || [])];
   } else {
     // Welfare: warehouse deliveries waiting to be counted
     const { data, error } = await sb.from('deliveries').select('*')
@@ -6967,13 +6969,37 @@ async function openPendingDeliveries() {
   const cards = list.map(s => {
     const when    = new Date(s.submitted_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
     const lines   = s.items || [];
-    const isWH    = s.source === 'warehouse' && s.status === 'welfare_counted';
+    const isWHCounted = s.source === 'warehouse' && s.status === 'welfare_counted';
+    const isWHPending = s.source === 'warehouse' && s.status === 'pending';
     const totalSent     = (s.summary && s.summary.totalUnits) || lines.reduce((sum, l) => sum + (Number(l.qty) || 0), 0);
     const recItems      = s.received_items || [];
     const totalReceived = recItems.reduce((sum, l) => sum + (Number(l.qty) || 0), 0);
     const countedWhen   = s.counted_at ? new Date(s.counted_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : '';
 
-    if (isWH) {
+    if (isWHPending) {
+      // James sent it; welfare hasn't counted yet — info only, no confirm button
+      return `
+        <div class="submission-card" style="border-left:3px solid #f59e0b; opacity:0.9;">
+          <div class="head">
+            <div>
+              <div class="who" style="color:#b45309;">&#128230; Warehouse dispatch</div>
+              <div class="when">Sent: ${when}</div>
+            </div>
+            <span style="background:#fef9c3; color:#92400e; padding:3px 8px; border-radius:12px; font-size:0.7rem; font-weight:700; border:1px solid #fcd34d;">Pending from Welfare</span>
+          </div>
+          <div class="stats">
+            <span>Sent <b>${totalSent}</b> units</span>
+            <span>${lines.length} item${lines.length !== 1 ? 's' : ''}</span>
+          </div>
+          <div style="font-size:0.76rem; color:var(--text-light); margin:4px 0 8px;">
+            ⏳ Waiting for welfare team to count received items
+          </div>
+          ${s.notes ? `<div style="font-size:0.76rem; color:var(--text-light); margin:4px 0 8px; font-style:italic;">&ldquo;${esc(s.notes)}&rdquo;</div>` : ''}
+          <div class="actions">
+            <button class="btn btn-outline" onclick="dismissDeliverySubmission('${s.id}')">Dismiss</button>
+          </div>
+        </div>`;
+    } else if (isWHCounted) {
       return `
         <div class="submission-card" style="border-left:3px solid #7c3aed;">
           <div class="head">
@@ -7230,11 +7256,13 @@ async function refreshPendingDeliveriesBanner() {
   if (!list.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
 
   if (isASM()) {
-    // Distinguish how many are welfare-counted warehouse vs raw supplier pending
+    // Distinguish delivery types for ASM
     const whCounted  = list.filter(d => d.source === 'warehouse' && d.status === 'welfare_counted');
+    const whPending  = list.filter(d => d.source === 'warehouse' && d.status === 'pending');
     const supPending = list.filter(d => d.source === 'supplier'  && d.status === 'pending');
     const parts = [];
     if (whCounted.length)  parts.push(`${whCounted.length} warehouse count${whCounted.length !== 1 ? 's' : ''} ready`);
+    if (whPending.length)  parts.push(`${whPending.length} pending from welfare`);
     if (supPending.length) parts.push(`${supPending.length} supplier deliver${supPending.length !== 1 ? 'ies' : 'y'}`);
     el.style.display = 'block';
     el.innerHTML = `
@@ -7253,8 +7281,8 @@ async function refreshPendingDeliveriesBanner() {
       <div class="pending-banner" onclick="openWelfareCountDeliveries()" style="cursor:pointer; background:linear-gradient(135deg,#6d28d922,#6d28d908); border-left:4px solid #7c3aed;">
         <div class="pending-banner-icon" style="background:#7c3aed;">📋</div>
         <div class="pending-banner-text">
-          <div class="pending-banner-title">${list.length} warehouse deliver${list.length !== 1 ? 'ies' : 'y'} to count</div>
-          <div class="pending-banner-sub">Tap to count what you received — ASM will then confirm</div>
+          <div class="pending-banner-title">Count Incoming Deliver${list.length !== 1 ? 'ies' : 'y'} (${list.length})</div>
+          <div class="pending-banner-sub">Tap to count items received from warehouse — ASM will then confirm</div>
         </div>
         <div class="pending-banner-arrow">&rsaquo;</div>
       </div>`;
