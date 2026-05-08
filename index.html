@@ -1326,7 +1326,7 @@ select.form-control {
    ================================================================= */
 // App version — bump alongside sw.js CACHE_NAME so ASM can verify which build
 // their device is actually running (shown under the email in the user menu).
-window.APP_VERSION = 'v69';
+window.APP_VERSION = 'v70';
 const SUPABASE_URL  = 'https://nogrnsjnwypihjaeulef.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5vZ3Juc2pud3lwaWhqYWV1bGVmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MDg2MzQsImV4cCI6MjA5MTk4NDYzNH0.ZxwsWtzzKO_nUSMQpH-FpbA2-5nYH8Nu1IegcKcYjW8';
 const PHOTO_BUCKET  = 'inventory-photos';
@@ -1454,10 +1454,11 @@ function applyRoleUI() {
     }
   }
 
-  // Header label — show the active hotel name once we know it
+  // Header label — warehouse always shows "SOS Property" (the org name);
+  // site staff see their hotel name
   const orgEl = document.getElementById('orgNameHeader');
   if (orgEl) {
-    const name = (HOTEL && HOTEL.name) ? HOTEL.name : 'SOS Property';
+    const name = isWarehouse() ? 'SOS Property' : ((HOTEL && HOTEL.name) ? HOTEL.name : 'SOS Property');
     orgEl.innerHTML = name + '<span class="header-sub">Inventory</span>';
   }
 
@@ -3161,7 +3162,7 @@ async function renderWarehouseDashboard() {
       </div>
       <div class="stat-card" style="border-color:#2563eb;">
         <div class="stat-value" style="color:#2563eb;">${totalCanSend.toLocaleString()}</div>
-        <div class="stat-label">Can Send Now</div>
+        <div class="stat-label">To Dispatch</div>
       </div>
       <div class="stat-card" style="border-color:#16a34a;">
         <div class="stat-value" style="color:#16a34a;">${totalEmergency.toLocaleString()}</div>
@@ -3181,7 +3182,7 @@ async function renderWarehouseDashboard() {
   const infoNote = `
     <div style="font-size:0.7rem;color:var(--text-light);display:flex;align-items:center;gap:5px;margin-bottom:8px;">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-      <b>Can Send</b> = warehouse qty minus 20% emergency reserve, capped at what sites actually need.
+      <b>To Dispatch</b> = what the sites need to reach max stock, capped at warehouse stock minus 20% emergency reserve.
     </div>`;
 
   // Group by category
@@ -3216,7 +3217,7 @@ async function renderWarehouseDashboard() {
         <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:5px; margin-bottom:6px;">
           <div style="background:var(--bg); border-radius:6px; padding:5px 4px; text-align:center;">
             <div style="font-size:0.78rem; font-weight:700; color:#2563eb;">${r.canSend}</div>
-            <div style="font-size:0.6rem; color:var(--text-light);">can send</div>
+            <div style="font-size:0.6rem; color:var(--text-light);">to dispatch</div>
           </div>
           <div style="background:var(--bg); border-radius:6px; padding:5px 4px; text-align:center;">
             <div style="font-size:0.78rem; font-weight:700; color:#16a34a;">${r.emergency}</div>
