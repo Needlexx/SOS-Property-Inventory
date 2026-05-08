@@ -1326,7 +1326,7 @@ select.form-control {
    ================================================================= */
 // App version — bump alongside sw.js CACHE_NAME so ASM can verify which build
 // their device is actually running (shown under the email in the user menu).
-window.APP_VERSION = 'v67';
+window.APP_VERSION = 'v68';
 const SUPABASE_URL  = 'https://nogrnsjnwypihjaeulef.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5vZ3Juc2pud3lwaWhqYWV1bGVmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MDg2MzQsImV4cCI6MjA5MTk4NDYzNH0.ZxwsWtzzKO_nUSMQpH-FpbA2-5nYH8Nu1IegcKcYjW8';
 const PHOTO_BUCKET  = 'inventory-photos';
@@ -5545,7 +5545,7 @@ function renderSendDeliveryTab(allItems, pending) {
     let expandedBody = '';
     if (isExpanded) {
       if (!alertItems.length) {
-        expandedBody = `<div style="padding:12px 14px; font-size:0.82rem; color:var(--success); border-top:1px solid var(--border);">✓ All items fully stocked — no shipment needed</div>`;
+        expandedBody = `<div onclick="event.stopPropagation()" style="padding:12px 14px; font-size:0.82rem; color:var(--success); border-top:1px solid var(--border);">✓ All items fully stocked — no shipment needed</div>`;
       } else {
         const draftTotal = alertItems.reduce((s, i) => {
           const key = h.id + '::' + i.id;
@@ -5609,7 +5609,7 @@ function renderSendDeliveryTab(allItems, pending) {
         }).join('');
 
         expandedBody = `
-          <div style="border-top:1px solid var(--border);">
+          <div onclick="event.stopPropagation()" style="border-top:1px solid var(--border);">
             ${itemRows}
             <div style="padding:10px 12px;display:flex;gap:8px;align-items:center;border-top:1px solid var(--border);background:var(--bg);">
               <span style="font-size:0.75rem;color:var(--text-light);flex:1;">${checkedCount} item${checkedCount!==1?'s':''} · ${draftTotal} units</span>
