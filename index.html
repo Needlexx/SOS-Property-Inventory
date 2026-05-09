@@ -2,6 +2,15 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<!-- Security headers: CSP restricts where scripts/data can come from; nosniff blocks
+     MIME-type confusion; referrer policy stops leaking the full URL to third parties.
+     'unsafe-inline'/'unsafe-eval' are still required because the app uses inline
+     onclick handlers and jsPDF/Chart.js depend on Function(). Connect-src restricts
+     where the app can send data to (Supabase only) — prevents data exfiltration
+     even if an attacker manages to inject a script. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.sheetjs.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; frame-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests">
+<meta http-equiv="X-Content-Type-Options" content="nosniff">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1327,7 +1336,7 @@ select.form-control {
    ================================================================= */
 // App version — bump alongside sw.js CACHE_NAME so ASM can verify which build
 // their device is actually running (shown under the email in the user menu).
-window.APP_VERSION = 'v72';
+window.APP_VERSION = 'v73';
 const SUPABASE_URL  = 'https://nogrnsjnwypihjaeulef.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5vZ3Juc2pud3lwaWhqYWV1bGVmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MDg2MzQsImV4cCI6MjA5MTk4NDYzNH0.ZxwsWtzzKO_nUSMQpH-FpbA2-5nYH8Nu1IegcKcYjW8';
 const PHOTO_BUCKET  = 'inventory-photos';
@@ -4295,24 +4304,93 @@ function togglePwVisibility(inputId, btnId) {
     : `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
 }
 
+/* ----- LOGIN THROTTLE (defence against brute-force) -----
+   Tracks failed sign-in attempts in localStorage and applies an exponential
+   delay. Backend rate-limiting in Supabase is the real protection; this is
+   a UX layer that slows down automated tools and gives a clear message. */
+const LOGIN_THROTTLE_KEY = 'inv_login_attempts';
+function _getLoginAttempts() {
+  try { return JSON.parse(localStorage.getItem(LOGIN_THROTTLE_KEY) || '{"count":0,"last":0}'); }
+  catch(_) { return { count: 0, last: 0 }; }
+}
+function _setLoginAttempts(count, last) {
+  try { localStorage.setItem(LOGIN_THROTTLE_KEY, JSON.stringify({ count, last })); } catch(_) {}
+}
+function _clearLoginAttempts() {
+  try { localStorage.removeItem(LOGIN_THROTTLE_KEY); } catch(_) {}
+}
+function _throttleDelayMs(count) {
+  // First 3 attempts free; then 5s, 15s, 30s, 60s (cap)
+  if (count < 3) return 0;
+  if (count === 3) return 5000;
+  if (count === 4) return 15000;
+  if (count === 5) return 30000;
+  return 60000;
+}
+
 async function doLogin() {
   const email = document.getElementById('loginEmail').value.trim();
   const password = document.getElementById('loginPassword').value;
   if (!email || !password) { toast('Enter email and password', 'warning'); return; }
+  // Format check — keeps obviously-wrong requests off the wire
+  if (!/^\S+@\S+\.\S+$/.test(email)) {
+    toast('Please enter a valid email address', 'warning'); return;
+  }
+  // Throttle check — block if last failure was inside the cooldown window
+  const att = _getLoginAttempts();
+  const wait = _throttleDelayMs(att.count);
+  const sinceLast = Date.now() - (att.last || 0);
+  if (wait > 0 && sinceLast < wait) {
+    const remain = Math.ceil((wait - sinceLast) / 1000);
+    toast(`Too many failed attempts — try again in ${remain}s`, 'warning', 4000);
+    return;
+  }
   const btn = document.getElementById('loginBtn');
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Signing in...';
   const { data, error } = await sb.auth.signInWithPassword({ email, password });
   if (error) {
-    showLoginScreen(error.message || 'Sign in failed');
+    // Bump failure counter; never reveal whether email or password was wrong
+    _setLoginAttempts((att.count || 0) + 1, Date.now());
+    showLoginScreen('Invalid email or password.');
     return;
   }
+  _clearLoginAttempts();
   currentUser = data.user;
   document.getElementById('loginScreen')?.remove();
   document.querySelector('main').style.display = '';
   document.querySelector('.tab-bar').style.display = '';
   document.querySelector('.app-header').style.display = '';
   toast('Signed in', 'success');
+  setupInactivityWatcher();
   await afterAuthReady();
+}
+
+/* ----- INACTIVITY AUTO-LOGOUT -----
+   After 30 min with no mouse/keyboard/touch activity, sign the user out
+   so a phone or kiosk left unattended cannot be used by someone else. */
+const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+let _inactivityTimer = null;
+let _inactivityListenersAttached = false;
+function _resetInactivityTimer() {
+  if (_inactivityTimer) clearTimeout(_inactivityTimer);
+  if (!currentUser) return;
+  _inactivityTimer = setTimeout(async () => {
+    try { unsubscribeRealtime && unsubscribeRealtime(); } catch(_) {}
+    try { stopPendingSubmissionsPoller && stopPendingSubmissionsPoller(); } catch(_) {}
+    try { await sb.auth.signOut(); } catch(_) {}
+    try { localStorage.removeItem(KEYS.activeHotel); } catch(_) {}
+    try { clearLocalCache(); } catch(_) {}
+    alert('You have been signed out due to 30 minutes of inactivity.');
+    location.reload();
+  }, INACTIVITY_TIMEOUT_MS);
+}
+function setupInactivityWatcher() {
+  if (_inactivityListenersAttached) { _resetInactivityTimer(); return; }
+  ['mousemove', 'mousedown', 'keydown', 'click', 'touchstart', 'scroll'].forEach(evt => {
+    document.addEventListener(evt, _resetInactivityTimer, { passive: true });
+  });
+  _inactivityListenersAttached = true;
+  _resetInactivityTimer();
 }
 
 async function doLogout() {
@@ -4518,17 +4596,18 @@ async function doSendReset() {
   const btn = document.getElementById('resetSendBtn');
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Sending...'; }
   const redirectTo = location.origin + location.pathname;
-  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo });
-  if (error) {
-    showErr(error.message || 'Could not send reset email.');
-    if (btn) { btn.disabled = false; btn.textContent = 'Send reset link'; }
-    return;
-  }
+  // We deliberately ignore the result here — showing the same message
+  // regardless of whether the email exists prevents account-enumeration
+  // attacks (an attacker can't probe which emails are registered).
+  try { await sb.auth.resetPasswordForEmail(email, { redirectTo }); } catch(_) {}
   closeModal();
-  toast('Reset link sent — check your email', 'success');
+  toast('If that email is registered, a reset link has been sent. Check your inbox.', 'success', 5000);
 }
 
 async function afterAuthReady() {
+  // Start the inactivity watchdog as soon as we know we have a session —
+  // covers both fresh logins and sessions restored from localStorage on reload.
+  try { setupInactivityWatcher(); } catch(_) {}
   // Load this user's profile + active hotel BEFORE any data pull.
   // If the profile is missing, sign out so the user is forced to re-sign-in
   // after the manager creates their profile row.
