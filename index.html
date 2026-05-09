@@ -1254,6 +1254,39 @@ select.form-control {
     </div>
   </div>
 
+  <!-- === ORDER & RECEIVE TAB (warehouse only) === -->
+  <div class="tab-page" id="pageOrderReceive">
+    <div class="card">
+      <h3 style="font-size:0.95rem; margin-bottom:6px;">📋 Place Supplier Order</h3>
+      <p style="font-size:0.78rem; color:var(--text-light); margin-bottom:10px; line-height:1.5;">
+        Generate a PDF order list of warehouse items at or below their minimum stock. Quantities are calculated in supplier cases (using base pack) so you can hand the PDF straight to the supplier.
+      </p>
+      <button class="btn btn-primary btn-block" onclick="generateWarehouseSupplierOrder()" style="gap:6px;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        Generate Order PDF
+      </button>
+    </div>
+
+    <div class="card">
+      <h3 style="font-size:0.95rem; margin-bottom:6px;">📦 Receive from Supplier</h3>
+      <p style="font-size:0.78rem; color:var(--text-light); margin-bottom:10px; line-height:1.5;">
+        Record stock that has just arrived from a supplier. Enter the quantity received against each product — these add to warehouse stock immediately.
+      </p>
+      <button class="btn btn-success btn-block" onclick="openReceiveFromSupplierModal()" style="gap:6px;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7-7 7 7"/></svg>
+        Record Supplier Receipt
+      </button>
+    </div>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <h3 style="font-size:0.95rem; margin:0;">📜 Recent Receipts</h3>
+        <button class="btn btn-outline" onclick="loadRecentReceipts()" style="padding:5px 10px; font-size:0.75rem;">Refresh</button>
+      </div>
+      <div id="recentReceiptsList" style="font-size:0.85rem; color:var(--text-light);">Tap Refresh to load.</div>
+    </div>
+  </div>
+
   <!-- === SEND DELIVERY TAB (warehouse only) === -->
   <div class="tab-page" id="pageSendDelivery">
     <div class="card">
@@ -1324,6 +1357,10 @@ select.form-control {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
     Reports
   </button>
+  <button class="tab-btn" id="tabBtnOrderReceive" onclick="switchTab('OrderReceive')" style="display:none;">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></svg>
+    Order &amp; Receive
+  </button>
   <button class="tab-btn" id="tabBtnSendDelivery" onclick="switchTab('SendDelivery')" style="display:none;">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
     Send Delivery
@@ -1336,7 +1373,7 @@ select.form-control {
    ================================================================= */
 // App version — bump alongside sw.js CACHE_NAME so ASM can verify which build
 // their device is actually running (shown under the email in the user menu).
-window.APP_VERSION = 'v73';
+window.APP_VERSION = 'v74';
 const SUPABASE_URL  = 'https://nogrnsjnwypihjaeulef.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5vZ3Juc2pud3lwaWhqYWV1bGVmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MDg2MzQsImV4cCI6MjA5MTk4NDYzNH0.ZxwsWtzzKO_nUSMQpH-FpbA2-5nYH8Nu1IegcKcYjW8';
 const PHOTO_BUCKET  = 'inventory-photos';
@@ -1433,14 +1470,16 @@ function applyRoleUI() {
   // Welfare/ASM can record deliveries inbound to their hotel; warehouse doesn't
   // use this flow (they push outbound from the Send Delivery tab instead).
   if (recordDeliveryBtn) recordDeliveryBtn.style.display = warehouse ? 'none' : '';
-  // Warehouse-only tab — visible only for James
+  // Warehouse-only tabs — visible only for James
   const sendDeliveryTabBtn = document.getElementById('tabBtnSendDelivery');
   if (sendDeliveryTabBtn) sendDeliveryTabBtn.style.display = warehouse ? '' : 'none';
+  const orderReceiveTabBtn = document.getElementById('tabBtnOrderReceive');
+  if (orderReceiveTabBtn) orderReceiveTabBtn.style.display = warehouse ? '' : 'none';
   // Hide hotel-staff tabs for the warehouse role — James doesn't issue items,
   // run stock counts, or browse a per-hotel transaction history.
   const allTabBtns = document.querySelectorAll('.tab-bar > .tab-btn');
   const hideForWarehouse = ['Issue', 'Count', 'History'];
-  const fullTabOrder = ['Issue','Stock','Count','History','Dashboard','Reports','SendDelivery'];
+  const fullTabOrder = ['Issue','Stock','Count','History','Dashboard','Reports','OrderReceive','SendDelivery'];
   fullTabOrder.forEach((nm, i) => {
     if (!allTabBtns[i]) return;
     if (hideForWarehouse.includes(nm)) {
@@ -1842,7 +1881,7 @@ function switchTab(name) {
   document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('page' + name).classList.add('active');
-  const tabOrder = ['Issue','Stock','Count','History','Dashboard','Reports','SendDelivery'];
+  const tabOrder = ['Issue','Stock','Count','History','Dashboard','Reports','OrderReceive','SendDelivery'];
   const idx = tabOrder.indexOf(name);
   const allTabs = document.querySelectorAll('.tab-btn');
   if (idx >= 0 && allTabs[idx]) allTabs[idx].classList.add('active');
@@ -1853,6 +1892,7 @@ function switchTab(name) {
   if (name === 'History') renderHistory();
   if (name === 'Dashboard') renderDashboard();
   if (name === 'Reports') { initReports(); renderArchive(); }
+  if (name === 'OrderReceive') loadRecentReceipts();
   if (name === 'SendDelivery') loadSendDeliveryTab();
 }
 
@@ -6217,15 +6257,12 @@ function renderWarehouseOwnView() {
         <div class="stat-label">Stock value${valuedItems < allItems.length ? ` (${valuedItems} priced)` : ''}</div>
       </div>
     </div>
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:10px;">
-      <button class="btn btn-primary" onclick="openReceiveFromSupplierModal()" style="padding:11px 6px; font-size:0.82rem;">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:middle; margin-right:4px;"><path d="M12 5v14M5 12l7-7 7 7"/></svg>
-        Receive from Supplier
-      </button>
-      <button class="btn btn-success" onclick="openSendToSiteModal()" style="padding:11px 6px; font-size:0.82rem;">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:middle; margin-right:4px;"><path d="M22 2L11 13M22 2L15 22l-4-9-9-4 19-7z"/></svg>
-        Send to Site
-      </button>
+    <button class="btn btn-success btn-block" onclick="openSendToSiteModal()" style="padding:11px 6px; font-size:0.82rem; margin-bottom:10px;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:middle; margin-right:4px;"><path d="M22 2L11 13M22 2L15 22l-4-9-9-4 19-7z"/></svg>
+      Send Extra Stock to Site
+    </button>
+    <div style="font-size:0.7rem; color:var(--text-light); margin-bottom:10px; text-align:center;">
+      To record a supplier delivery, switch to the <b>Order &amp; Receive</b> tab.
     </div>
     <div style="display:flex; gap:8px; margin-bottom:10px;">
       <input class="form-control" id="whSearchInput" type="search" placeholder="Search products…"
@@ -6328,6 +6365,147 @@ async function confirmReceiveFromSupplier() {
     toast(`Stock received: ${lines.length} product${lines.length !== 1 ? 's' : ''} updated`, 'success');
   }
   renderWarehouseOwnView();
+  // Refresh the receipts list on the Order & Receive tab if it's mounted
+  try { if (document.getElementById('recentReceiptsList')) loadRecentReceipts(); } catch(_) {}
+}
+
+/* ---------- Place Supplier Order (warehouse-only PDF) ---------- */
+
+async function generateWarehouseSupplierOrder() {
+  if (!isWarehouse()) { toast('Warehouse only', 'warning'); return; }
+  if (!window.jspdf || !window.jspdf.jsPDF) { toast('PDF library not loaded yet — try again in a moment', 'error'); return; }
+  const items = warehouseOwnItems.items || [];
+  if (!items.length) { toast('No warehouse items loaded — open the Stock tab first', 'warning'); return; }
+
+  // Items at or below min stock — these need ordering
+  const lowItems = items.filter(i => {
+    const qty = Number(i.quantity) || 0;
+    const min = Number(i.min_stock) || 0;
+    return min > 0 && qty <= min;
+  }).sort((a, b) => (a.category || '').localeCompare(b.category || '') || (a.name || '').localeCompare(b.name || ''));
+
+  if (!lowItems.length) {
+    toast('No warehouse items currently below minimum stock — no order needed.', 'success', 4000);
+    return;
+  }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+  const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+
+  doc.setFontSize(16);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Supplier Order — SOS Warehouse', 40, 50);
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Generated: ${today}`, 40, 68);
+  doc.text(`Items below min stock: ${lowItems.length}`, 40, 82);
+
+  // Build the order rows. order_qty (units) = max_stock - quantity (or 1.5 × min if no max).
+  // cases = ceil(order_qty / base_pack) when base_pack present; otherwise blank.
+  let totalUnits = 0;
+  let totalCases = 0;
+  let totalCost = 0;
+  const body = lowItems.map(i => {
+    const qty   = Number(i.quantity) || 0;
+    const min   = Number(i.min_stock) || 0;
+    const max   = Number(i.max_stock) || Math.max(min * 2, 20);
+    const need  = Math.max(0, max - qty);
+    const pack  = Number(i.base_pack) || 0;
+    const cases = pack > 0 ? Math.ceil(need / pack) : 0;
+    const orderUnits = pack > 0 ? cases * pack : need;          // round up to whole cases
+    const cost  = Number(i.cost) || 0;
+    const lineCost = orderUnits * cost;
+    totalUnits += orderUnits;
+    totalCases += cases;
+    totalCost  += lineCost;
+    return [
+      i.product_code || '',
+      i.name || '',
+      i.category || '',
+      String(qty),
+      String(min),
+      pack > 0 ? String(pack) : '—',
+      cases > 0 ? String(cases) : '—',
+      String(orderUnits),
+      cost > 0 ? `£${cost.toFixed(2)}` : '—',
+      lineCost > 0 ? `£${lineCost.toFixed(2)}` : '—'
+    ];
+  });
+
+  doc.autoTable({
+    startY: 100,
+    head: [['Code', 'Product', 'Category', 'In WH', 'Min', 'Pack', 'Cases', 'Units', 'Unit £', 'Line £']],
+    body,
+    theme: 'striped',
+    headStyles: { fillColor: [99, 102, 241], textColor: 255, fontSize: 9, fontStyle: 'bold' },
+    bodyStyles: { fontSize: 8 },
+    columnStyles: {
+      0: { cellWidth: 38 },
+      1: { cellWidth: 130 },
+      2: { cellWidth: 65 },
+      3: { halign: 'right', cellWidth: 35 },
+      4: { halign: 'right', cellWidth: 30 },
+      5: { halign: 'right', cellWidth: 30 },
+      6: { halign: 'right', cellWidth: 32 },
+      7: { halign: 'right', cellWidth: 35 },
+      8: { halign: 'right', cellWidth: 38 },
+      9: { halign: 'right', cellWidth: 45 }
+    },
+    foot: [['', '', '', '', '', '', String(totalCases || ''), String(totalUnits), '', `£${totalCost.toFixed(2)}`]],
+    footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold' },
+    didDrawPage: (data) => {
+      const pageHeight = doc.internal.pageSize.getHeight();
+      doc.setFontSize(8);
+      doc.setTextColor(120);
+      doc.text(`Page ${data.pageNumber}`, doc.internal.pageSize.getWidth() - 60, pageHeight - 16);
+      doc.text('SOS Property · Warehouse Order', 40, pageHeight - 16);
+      doc.setTextColor(0);
+    }
+  });
+
+  const filename = `Warehouse-Order-${new Date().toISOString().slice(0, 10)}.pdf`;
+  if (typeof previewPDF === 'function') previewPDF(doc, filename);
+  else doc.save(filename);
+}
+
+/* ---------- Recent Supplier Receipts (audit trail on the Order & Receive tab) ---------- */
+
+async function loadRecentReceipts() {
+  const el = document.getElementById('recentReceiptsList');
+  if (!el) return;
+  el.innerHTML = '<span class="spinner" style="margin-right:6px;"></span> Loading…';
+  const whId = getWarehouseHotelId();
+  if (!whId) { el.innerHTML = '<span style="color:var(--danger);">Warehouse not configured.</span>'; return; }
+  try {
+    const { data, error } = await sb.from('transactions')
+      .select('id, item_name, category, quantity, type, notes, issued_by, created_at')
+      .eq('hotel_id', whId).eq('type', 'received')
+      .order('created_at', { ascending: false }).limit(20);
+    if (error) throw error;
+    const list = data || [];
+    if (!list.length) {
+      el.innerHTML = '<div style="padding:10px 0; color:var(--text-light); font-size:0.85rem;">No supplier receipts recorded yet.</div>';
+      return;
+    }
+    el.innerHTML = list.map(t => {
+      const when = new Date(t.created_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+      return `
+        <div style="padding:8px 0; border-bottom:1px solid var(--border); font-size:0.82rem;">
+          <div style="display:flex; justify-content:space-between; gap:8px;">
+            <b style="color:var(--text);">${esc(t.item_name || 'Item')}</b>
+            <span style="color:#16a34a; font-weight:700; white-space:nowrap;">+${Number(t.quantity) || 0}</span>
+          </div>
+          <div style="font-size:0.7rem; color:var(--text-light); margin-top:2px;">
+            ${esc(t.category || '')} · ${when} · by ${esc(t.issued_by || '—')}
+          </div>
+          ${t.notes ? `<div style="font-size:0.7rem; color:var(--text-softer); font-style:italic; margin-top:2px;">"${esc(t.notes)}"</div>` : ''}
+        </div>`;
+    }).join('');
+  } catch(e) {
+    console.error('[receipts] load failed:', e);
+    el.innerHTML = `<span style="color:var(--danger); font-size:0.85rem;">Could not load: ${esc(e.message || 'unknown error')}</span>`;
+  }
 }
 
 /* ---------- Send to Site ---------- */
