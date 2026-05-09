@@ -1373,7 +1373,7 @@ select.form-control {
    ================================================================= */
 // App version — bump alongside sw.js CACHE_NAME so ASM can verify which build
 // their device is actually running (shown under the email in the user menu).
-window.APP_VERSION = 'v74';
+window.APP_VERSION = 'v75';
 const SUPABASE_URL  = 'https://nogrnsjnwypihjaeulef.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5vZ3Juc2pud3lwaWhqYWV1bGVmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MDg2MzQsImV4cCI6MjA5MTk4NDYzNH0.ZxwsWtzzKO_nUSMQpH-FpbA2-5nYH8Nu1IegcKcYjW8';
 const PHOTO_BUCKET  = 'inventory-photos';
@@ -6335,26 +6335,34 @@ async function confirmReceiveFromSupplier() {
   closeModal();
 
   let failed = 0;
+  const successfulLines = [];
   for (const { item, qty } of lines) {
     const newQty = (Number(item.quantity) || 0) + qty;
     const { error } = await sb.from('items').update({ quantity: newQty }).eq('id', item.id);
     if (error) { failed++; console.error('[recv]', error); }
     else {
-      // Log to transactions
-      await sb.from('transactions').insert({
-        item_id: item.id,
-        item_name: item.name,
-        category: item.category || '',
-        quantity: qty,
-        type: 'received',
-        notes: notes || 'Received from supplier',
-        issued_by: (currentUser && currentUser.email) || 'warehouse',
-        hotel_id: getWarehouseHotelId()
-      });
-      // Update local cache
+      successfulLines.push({ item, qty });
       const cached = warehouseOwnItems.items.find(x => x.id === item.id);
       if (cached) cached.quantity = newQty;
     }
+  }
+  // Log a single transaction row capturing the whole supplier receipt.
+  // The transactions table stores items as a JSONB array (no per-item rows),
+  // so we use user_name='Supplier' as the marker to distinguish receipts
+  // from regular guest issues. staff_name records who entered it.
+  if (successfulLines.length) {
+    const txnItems = successfulLines.map(l => ({
+      id: l.item.id, name: l.item.name, category: l.item.category || '',
+      qty: l.qty, unit: l.item.unit || ''
+    }));
+    const { error: txnErr } = await sb.from('transactions').insert({
+      user_name: 'Supplier',
+      staff_name: (currentUser && currentUser.email) || 'warehouse',
+      items: txnItems,
+      notes: notes ? `Received from supplier: ${notes}` : 'Received from supplier',
+      hotel_id: getWarehouseHotelId()
+    });
+    if (txnErr) { console.warn('[recv] txn log failed:', txnErr); }
   }
 
   if (failed > 0) {
@@ -6478,9 +6486,10 @@ async function loadRecentReceipts() {
   const whId = getWarehouseHotelId();
   if (!whId) { el.innerHTML = '<span style="color:var(--danger);">Warehouse not configured.</span>'; return; }
   try {
+    // Supplier receipts are flagged by user_name='Supplier' (see confirmReceiveFromSupplier)
     const { data, error } = await sb.from('transactions')
-      .select('id, item_name, category, quantity, type, notes, issued_by, created_at')
-      .eq('hotel_id', whId).eq('type', 'received')
+      .select('id, items, notes, staff_name, created_at, user_name')
+      .eq('hotel_id', whId).eq('user_name', 'Supplier')
       .order('created_at', { ascending: false }).limit(20);
     if (error) throw error;
     const list = data || [];
@@ -6490,15 +6499,25 @@ async function loadRecentReceipts() {
     }
     el.innerHTML = list.map(t => {
       const when = new Date(t.created_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+      const items = Array.isArray(t.items) ? t.items : [];
+      const totalQty = items.reduce((s, l) => s + (Number(l.qty) || 0), 0);
+      const itemSummary = items.length === 0 ? '—'
+        : items.length === 1 ? esc(items[0].name || 'Item')
+        : `${esc(items[0].name || 'Item')} +${items.length - 1} more`;
+      const itemsBlock = items.length > 1 ? `
+        <div style="font-size:0.7rem; color:var(--text-softer); margin-top:3px;">
+          ${items.map(l => `${esc(l.name || '?')} <b>+${Number(l.qty) || 0}</b>`).join(' &middot; ')}
+        </div>` : '';
       return `
         <div style="padding:8px 0; border-bottom:1px solid var(--border); font-size:0.82rem;">
           <div style="display:flex; justify-content:space-between; gap:8px;">
-            <b style="color:var(--text);">${esc(t.item_name || 'Item')}</b>
-            <span style="color:#16a34a; font-weight:700; white-space:nowrap;">+${Number(t.quantity) || 0}</span>
+            <b style="color:var(--text);">${itemSummary}</b>
+            <span style="color:#16a34a; font-weight:700; white-space:nowrap;">+${totalQty} units</span>
           </div>
           <div style="font-size:0.7rem; color:var(--text-light); margin-top:2px;">
-            ${esc(t.category || '')} · ${when} · by ${esc(t.issued_by || '—')}
+            ${items.length} product${items.length !== 1 ? 's' : ''} &middot; ${when} &middot; by ${esc(t.staff_name || '—')}
           </div>
+          ${itemsBlock}
           ${t.notes ? `<div style="font-size:0.7rem; color:var(--text-softer); font-style:italic; margin-top:2px;">"${esc(t.notes)}"</div>` : ''}
         </div>`;
     }).join('');
