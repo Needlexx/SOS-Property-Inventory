@@ -1,4 +1,4 @@
-const CACHE_NAME = 'inventory-app-v76-fix';
+const CACHE_NAME = 'inventory-app-v78';
 const ASSETS = [
   './',
   './index.html',

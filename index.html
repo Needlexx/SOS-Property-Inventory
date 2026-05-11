@@ -1373,7 +1373,7 @@ select.form-control {
    ================================================================= */
 // App version — bump alongside sw.js CACHE_NAME so ASM can verify which build
 // their device is actually running (shown under the email in the user menu).
-window.APP_VERSION = 'v76-fix';
+window.APP_VERSION = 'v78';
 const SUPABASE_URL  = 'https://nogrnsjnwypihjaeulef.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5vZ3Juc2pud3lwaWhqYWV1bGVmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MDg2MzQsImV4cCI6MjA5MTk4NDYzNH0.ZxwsWtzzKO_nUSMQpH-FpbA2-5nYH8Nu1IegcKcYjW8';
 const PHOTO_BUCKET  = 'inventory-photos';
@@ -7164,6 +7164,7 @@ async function applyDeliverySubmission(id) {
       : (sub.items || []);
     const allItems = getItems();
     const affected = [];
+    let newItemCount = 0;
     lines.forEach(l => {
       // Primary match: same hotel item id (regular hotel→hotel deliveries)
       let idx = allItems.findIndex(x => x.id === l.id);
@@ -7177,7 +7178,23 @@ async function applyDeliverySubmission(id) {
         idx = allItems.findIndex(x => norm(x.name) === norm(l.name));
       }
       if (idx < 0) {
-        console.warn('[deliveries] Item not found locally — skipped:', l.id, l.product_code, l.name);
+        // Product doesn't exist at this site yet — create it automatically
+        // so the site catalogue grows when the warehouse sends something new.
+        const add = Number(l.qty) || 0;
+        if (add <= 0 || !l.name) return;
+        const newItem = {
+          id: crypto.randomUUID(),
+          name: l.name,
+          category: l.category || 'Other',
+          quantity: add,
+          unit: l.unit || 'pcs',
+          minStock: Number(l.min_stock) || 0,
+          maxStock: Number(l.max_stock) || 0,
+          productCode: l.product_code || null,
+        };
+        allItems.push(newItem);
+        affected.push({ id: newItem.id, name: newItem.name, from: 0, add, to: add });
+        newItemCount++;
         return;
       }
       const before = Number(allItems[idx].quantity) || 0;
@@ -7210,7 +7227,8 @@ async function applyDeliverySubmission(id) {
       toast(`${failed.length} item(s) failed cloud sync — they will retry`, 'warning');
     }
     const totalAdded = affected.reduce((s, a) => s + a.add, 0);
-    await finishDeliveryAndContinue(`Added ${totalAdded} unit${totalAdded !== 1 ? 's' : ''} across ${affected.length} item${affected.length !== 1 ? 's' : ''}`);
+    const newMsg = newItemCount ? ` · ${newItemCount} new product${newItemCount !== 1 ? 's' : ''} added to catalogue` : '';
+    await finishDeliveryAndContinue(`Added ${totalAdded} unit${totalAdded !== 1 ? 's' : ''} across ${affected.length} item${affected.length !== 1 ? 's' : ''}${newMsg}`);
   } catch (err) {
     console.error('[deliveries] applyDeliverySubmission failed:', err);
     toast('Could not apply delivery: ' + (err && err.message ? err.message : 'unknown error'), 'error');
