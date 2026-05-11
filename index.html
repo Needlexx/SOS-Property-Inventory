@@ -1373,7 +1373,7 @@ select.form-control {
    ================================================================= */
 // App version — bump alongside sw.js CACHE_NAME so ASM can verify which build
 // their device is actually running (shown under the email in the user menu).
-window.APP_VERSION = 'v76';
+window.APP_VERSION = 'v77';
 const SUPABASE_URL  = 'https://nogrnsjnwypihjaeulef.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5vZ3Juc2pud3lwaWhqYWV1bGVmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MDg2MzQsImV4cCI6MjA5MTk4NDYzNH0.ZxwsWtzzKO_nUSMQpH-FpbA2-5nYH8Nu1IegcKcYjW8';
 const PHOTO_BUCKET  = 'inventory-photos';
@@ -1503,11 +1503,13 @@ function applyRoleUI() {
     }
   }
 
-  // Header label — warehouse always shows "SOS Property" (the org name);
-  // site staff see their hotel name
+  // Header label — warehouse shows the ORG name (e.g. "SOS Property")
+  // because they oversee every hotel in the org. Site staff see their
+  // own hotel name. Falls back to the org name if no hotel context.
   const orgEl = document.getElementById('orgNameHeader');
   if (orgEl) {
-    const name = isWarehouse() ? 'SOS Property' : ((HOTEL && HOTEL.name) ? HOTEL.name : 'SOS Property');
+    const orgName = getOrgName();
+    const name = isWarehouse() ? orgName : ((HOTEL && HOTEL.name) ? HOTEL.name : orgName);
     orgEl.innerHTML = name + '<span class="header-sub">Inventory</span>';
   }
 
@@ -1542,31 +1544,56 @@ function applyRoleUI() {
 const KEYS = { items: 'inv_items', transactions: 'inv_transactions', settings: 'inv_settings', fridayReport: 'inv_friday_report', fridayReorderZip: 'inv_friday_reorder_zip', orphanSweep: 'inv_last_orphan_sweep', activeHotel: 'inv_active_hotel' };
 
 /* =================================================================
-   MULTI-HOTEL STATE — populated after login from public.user_profiles
-   - HOTEL: { id, code, name } of the hotel currently being viewed
-   - USER_ROLE: 'staff' (locked to one hotel) | 'warehouse' (can switch)
-   - ALL_HOTELS: every hotel row, only loaded for warehouse role
+   MULTI-ORG / MULTI-HOTEL STATE — populated after login
+   - ORG:        { id, code, name, plan, … } the customer organization
+                 the signed-in user belongs to (e.g. SOS Property,
+                 Mears, UNHCR Greece). RLS guarantees per-org isolation.
+   - HOTEL:      { id, code, name } the hotel/site currently being viewed
+   - USER_ROLE:  'staff' (locked to one hotel) | 'warehouse' (can switch
+                 hotels within their org)
+   - ALL_HOTELS: every hotel row in the user's org (only loaded for
+                 warehouse role — RLS filters by org for everyone)
    ================================================================= */
+let ORG = null;
 let HOTEL = null;
 let USER_ROLE = 'staff';
 let ALL_HOTELS = [];
 
 function getActiveHotelId() { return HOTEL && HOTEL.id ? HOTEL.id : ''; }
 function isWarehouse() { return USER_ROLE === 'warehouse'; }
+function getOrgName()    { return (ORG && ORG.name) ? ORG.name : 'SOS Property'; }
 
-// After auth: read profile + hotel record(s). Throws if no profile exists yet.
+// After auth: read profile (org_id, role, hotel_id), then the org row
+// and the hotel row(s). Throws if no profile exists yet.
 async function loadProfileAndHotel() {
   if (!currentUser || !currentUser.id) throw new Error('No user session');
   const { data: prof, error: e1 } = await sb
-    .from('user_profiles').select('role, hotel_id').eq('user_id', currentUser.id).single();
+    .from('user_profiles').select('role, hotel_id, org_id').eq('user_id', currentUser.id).single();
   if (e1 || !prof) {
-    console.error('[hotel] profile fetch failed:', e1);
+    console.error('[profile] fetch failed:', e1);
     throw new Error('No profile found — ask the manager to set up your account.');
   }
   USER_ROLE = prof.role || 'staff';
 
+  // Load the org row. The migration backfills every existing profile
+  // to the SOS org, so this should always succeed. RLS prevents the
+  // user from reading any other org's row.
+  if (prof.org_id) {
+    const { data: org, error: eOrg } = await sb
+      .from('organizations').select('id, code, name, plan, brand_color, max_sites')
+      .eq('id', prof.org_id).single();
+    if (eOrg) console.warn('[org] fetch failed (continuing):', eOrg);
+    ORG = org || null;
+  } else {
+    // Backwards-compat: profile predates the org migration. Fall back
+    // to the default org name so the header isn't blank.
+    ORG = null;
+    console.warn('[org] profile has no org_id — run add-organizations.sql');
+  }
+
   if (USER_ROLE === 'warehouse') {
-    // Warehouse: load every hotel and pick the last-used one (or the first)
+    // Warehouse: load every hotel in this org (RLS handles the filter)
+    // and pick the last-used one (or the first).
     const { data: hots, error: e2 } = await sb.from('hotels').select('id, code, name').order('name');
     if (e2) { console.warn('[hotel] hotels fetch failed:', e2); }
     ALL_HOTELS = hots || [];
@@ -1582,7 +1609,7 @@ async function loadProfileAndHotel() {
     HOTEL = hot;
   }
   if (HOTEL) localStorage.setItem(KEYS.activeHotel, JSON.stringify(HOTEL));
-  console.log('[hotel] active:', HOTEL && HOTEL.code, '| role:', USER_ROLE);
+  console.log('[boot] org:', ORG && ORG.code, '| active hotel:', HOTEL && HOTEL.code, '| role:', USER_ROLE);
 }
 
 // Wipe in-memory + localStorage caches that belong to a single hotel.
@@ -3599,7 +3626,7 @@ async function generateAllSitesReorderZip() {
             doc.setFontSize(8);
             doc.setTextColor(130);
             doc.text(`Page ${data.pageNumber} of ${pageCount}`, pageSize.width - 80, pageHeight - 16);
-            doc.text(`${hotel.name}  ·  SOS Property Inventory`, 40, pageHeight - 16);
+            doc.text(`${hotel.name}  ·  ${getOrgName()} Inventory`, 40, pageHeight - 16);
             doc.setTextColor(0);
           }
         });
@@ -4092,7 +4119,7 @@ function downloadPDFReport() {
 function _newPdf(title, from, to) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
-  const hotelName = (HOTEL && HOTEL.name && HOTEL.code !== 'WAREHOUSE') ? HOTEL.name : 'SOS Property';
+  const hotelName = (HOTEL && HOTEL.name && HOTEL.code !== 'WAREHOUSE') ? HOTEL.name : getOrgName();
   doc.setFontSize(16);
   doc.text(`${hotelName} — ${title}`, 40, 40);
   doc.setFontSize(10);
@@ -4105,7 +4132,7 @@ function _newPdf(title, from, to) {
 
 // Returns the current hotel name for use in Excel reports
 function _reportHotelName() {
-  return (HOTEL && HOTEL.name && HOTEL.code !== 'WAREHOUSE') ? HOTEL.name : 'SOS Property';
+  return (HOTEL && HOTEL.name && HOTEL.code !== 'WAREHOUSE') ? HOTEL.name : getOrgName();
 }
 
 function downloadPDFTransactionReport(from, to) {
@@ -4220,7 +4247,7 @@ function _pdfFooter(doc, data) {
   doc.setFontSize(8);
   doc.setTextColor(120);
   doc.text(`Page ${data.pageNumber} of ${pageCount}`, pageSize.width - 80, pageHeight - 20);
-  doc.text('SOS Property Inventory', 40, pageHeight - 20);
+  doc.text(`${getOrgName()} Inventory`, 40, pageHeight - 20);
   doc.setTextColor(0);
 }
 
@@ -4443,7 +4470,7 @@ async function doLogout() {
     // active-hotel pointer so a different account on this device starts clean.
     clearLocalCache();
     try { localStorage.removeItem(KEYS.activeHotel); } catch(_) {}
-    HOTEL = null; USER_ROLE = 'staff'; ALL_HOTELS = [];
+    ORG = null; HOTEL = null; USER_ROLE = 'staff'; ALL_HOTELS = [];
     currentUser = null;
     location.reload();
   });
@@ -6534,7 +6561,7 @@ async function generateWarehouseSupplierOrder() {
 
   doc.setFontSize(16);
   doc.setFont('helvetica', 'bold');
-  doc.text('Supplier Order — SOS Warehouse', 40, 50);
+  doc.text(`Supplier Order — ${getOrgName()} Warehouse`, 40, 50);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
   doc.text(`Generated: ${today}`, 40, 68);
@@ -6598,7 +6625,7 @@ async function generateWarehouseSupplierOrder() {
       doc.setFontSize(8);
       doc.setTextColor(120);
       doc.text(`Page ${data.pageNumber}`, doc.internal.pageSize.getWidth() - 60, pageHeight - 16);
-      doc.text('SOS Property · Warehouse Order', 40, pageHeight - 16);
+      doc.text(`${getOrgName()} · Warehouse Order`, 40, pageHeight - 16);
       doc.setTextColor(0);
     }
   });
