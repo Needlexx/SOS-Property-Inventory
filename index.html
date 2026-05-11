@@ -1373,7 +1373,7 @@ select.form-control {
    ================================================================= */
 // App version — bump alongside sw.js CACHE_NAME so ASM can verify which build
 // their device is actually running (shown under the email in the user menu).
-window.APP_VERSION = 'v79';
+window.APP_VERSION = 'v80';
 const SUPABASE_URL  = 'https://nogrnsjnwypihjaeulef.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5vZ3Juc2pud3lwaWhqYWV1bGVmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MDg2MzQsImV4cCI6MjA5MTk4NDYzNH0.ZxwsWtzzKO_nUSMQpH-FpbA2-5nYH8Nu1IegcKcYjW8';
 const PHOTO_BUCKET  = 'inventory-photos';
@@ -1426,6 +1426,12 @@ function isASM() {
 }
 function requireASM(msg) {
   if (isASM()) return true;
+  toast(msg || 'ASM access only', 'warning');
+  return false;
+}
+// Warehouse users can manage warehouse stock; ASM manages site stock.
+function requireASMorWarehouse(msg) {
+  if (isASM() || isWarehouse()) return true;
   toast(msg || 'ASM access only', 'warning');
   return false;
 }
@@ -2058,7 +2064,7 @@ function addItem() {
 }
 
 function openEditItemModal(id) {
-  if (!requireASM('Only ASM can edit items')) return;
+  if (!requireASMorWarehouse('Only ASM or warehouse can edit items')) return;
   const items = getItems();
   const i = items.find(x => x.id === id);
   if (!i) return;
@@ -2106,7 +2112,7 @@ function openEditItemModal(id) {
 }
 
 function saveEditItem(id) {
-  if (!requireASM('Only ASM can edit items')) return;
+  if (!requireASMorWarehouse('Only ASM or warehouse can edit items')) return;
   const items = getItems();
   const idx = items.findIndex(i => i.id === id);
   if (idx < 0) return;
