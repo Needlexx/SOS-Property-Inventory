@@ -1373,7 +1373,7 @@ select.form-control {
    ================================================================= */
 // App version — bump alongside sw.js CACHE_NAME so ASM can verify which build
 // their device is actually running (shown under the email in the user menu).
-window.APP_VERSION = 'v78';
+window.APP_VERSION = 'v79';
 const SUPABASE_URL  = 'https://nogrnsjnwypihjaeulef.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5vZ3Juc2pud3lwaWhqYWV1bGVmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MDg2MzQsImV4cCI6MjA5MTk4NDYzNH0.ZxwsWtzzKO_nUSMQpH-FpbA2-5nYH8Nu1IegcKcYjW8';
 const PHOTO_BUCKET  = 'inventory-photos';
@@ -4422,12 +4422,21 @@ async function doLogin() {
   toast('Signed in', 'success');
   setupInactivityWatcher();
   await afterAuthReady();
+  logLoginEvent(); // fire-and-forget — records login for audit trail
 }
 
 /* ----- INACTIVITY AUTO-LOGOUT -----
-   After 30 min with no mouse/keyboard/touch activity, sign the user out
-   so a phone or kiosk left unattended cannot be used by someone else. */
-const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+   Welfare accounts get 12 hours (they work long shifts and must not be
+   interrupted). ASM, warehouse and all others get 30 minutes. */
+function getInactivityTimeoutMs() {
+  const email = (currentUser && currentUser.email || '').toLowerCase();
+  if (email.includes('welfare')) return 12 * 60 * 60 * 1000; // 12 hours
+  return 30 * 60 * 1000; // 30 minutes
+}
+function getInactivityLabel() {
+  const email = (currentUser && currentUser.email || '').toLowerCase();
+  return email.includes('welfare') ? '12 hours' : '30 minutes';
+}
 let _inactivityTimer = null;
 let _inactivityListenersAttached = false;
 function _resetInactivityTimer() {
@@ -4439,9 +4448,9 @@ function _resetInactivityTimer() {
     try { await sb.auth.signOut(); } catch(_) {}
     try { localStorage.removeItem(KEYS.activeHotel); } catch(_) {}
     try { clearLocalCache(); } catch(_) {}
-    alert('You have been signed out due to 30 minutes of inactivity.');
+    alert(`You have been signed out due to ${getInactivityLabel()} of inactivity.`);
     location.reload();
-  }, INACTIVITY_TIMEOUT_MS);
+  }, getInactivityTimeoutMs());
 }
 function setupInactivityWatcher() {
   if (_inactivityListenersAttached) { _resetInactivityTimer(); return; }
@@ -4466,6 +4475,26 @@ async function doLogout() {
     currentUser = null;
     location.reload();
   });
+}
+
+/* ----- LOGIN EVENT TRACKING -----
+   Records each successful login to login_events table so managers can
+   see which accounts are active and how often welfare is logging in. */
+async function logLoginEvent() {
+  if (!currentUser) return;
+  try {
+    await sb.from('login_events').insert({
+      user_id:    currentUser.id,
+      user_email: currentUser.email,
+      hotel_code: HOTEL ? HOTEL.code : null,
+      role:       USER_ROLE,
+      logged_in_at: new Date().toISOString(),
+      user_agent: (navigator.userAgent || '').substring(0, 250)
+    });
+    console.log('[login] event logged for', currentUser.email);
+  } catch(e) {
+    console.warn('[login] could not log login event:', e);
+  }
 }
 
 /* ----- USER MENU (header dropdown) ----- */
