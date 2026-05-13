@@ -1408,7 +1408,7 @@ select.form-control {
    ================================================================= */
 // App version — bump alongside sw.js CACHE_NAME so ASM can verify which build
 // their device is actually running (shown under the email in the user menu).
-window.APP_VERSION = 'v85';
+window.APP_VERSION = 'v86';
 const SUPABASE_URL  = 'https://nogrnsjnwypihjaeulef.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5vZ3Juc2pud3lwaWhqYWV1bGVmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MDg2MzQsImV4cCI6MjA5MTk4NDYzNH0.ZxwsWtzzKO_nUSMQpH-FpbA2-5nYH8Nu1IegcKcYjW8';
 const PHOTO_BUCKET  = 'inventory-photos';
@@ -4369,7 +4369,7 @@ function renderSiteStockCountTab(rows) {
     const weekRows = grouped[wk];
     const wkDate  = new Date(wk);
     const fri     = new Date(wk); fri.setDate(wkDate.getDate() + 4);
-    const wkLabel = `Week of ${wkDate.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})} (Fri ${fri.toLocaleDateString('en-GB',{day:'2-digit',month:'short'})})`;
+    const wkLabel = fri.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
 
     html += `<div style="font-size:0.72rem; font-weight:700; color:var(--text-light);
       text-transform:uppercase; letter-spacing:0.07em;
