@@ -1311,6 +1311,31 @@ select.form-control {
       </div>
     </div>
   </div>
+
+  <!-- === SITE STOCK COUNT TAB (warehouse only) === -->
+  <div class="tab-page" id="pageSiteStockCount">
+    <div class="card">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+        <div>
+          <h3 style="font-size:0.95rem; font-weight:700; margin-bottom:3px;">📋 Site Stock Counts</h3>
+          <p style="font-size:0.75rem; color:var(--text-light); line-height:1.4;">All site stock count submissions across hotels. Sites submit every Friday.</p>
+        </div>
+        <button class="btn btn-outline" onclick="loadSiteStockCountTab()" style="padding:6px 12px; font-size:0.75rem; flex-shrink:0; margin-left:10px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>Refresh
+        </button>
+      </div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap;" id="sscFilterRow">
+        <button class="cat-pill active" id="sscFilterAll"   onclick="sscSetFilter('all')"   >All Sites</button>
+        <button class="cat-pill"        id="sscFilterHIW"   onclick="sscSetFilter('HIWEMBLEY')">HI Wembley</button>
+        <button class="cat-pill"        id="sscFilterBWW"   onclick="sscSetFilter('BWWEMBLEY')">BW Wembley</button>
+      </div>
+    </div>
+    <div id="siteStockCountContent">
+      <div class="card" style="text-align:center; color:var(--text-light); padding:24px;">
+        Tap <b>Refresh</b> to load site stock counts.
+      </div>
+    </div>
+  </div>
 </main>
 
 <!-- ===== PDF FULLSCREEN LIGHTBOX ===== -->
@@ -1371,6 +1396,10 @@ select.form-control {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
     Send Delivery
   </button>
+  <button class="tab-btn" id="tabBtnSiteStockCount" onclick="switchTab('SiteStockCount')" style="display:none;">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+    Site Counts
+  </button>
 </nav>
 
 <script>
@@ -1379,7 +1408,7 @@ select.form-control {
    ================================================================= */
 // App version — bump alongside sw.js CACHE_NAME so ASM can verify which build
 // their device is actually running (shown under the email in the user menu).
-window.APP_VERSION = 'v84';
+window.APP_VERSION = 'v85';
 const SUPABASE_URL  = 'https://nogrnsjnwypihjaeulef.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5vZ3Juc2pud3lwaWhqYWV1bGVmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MDg2MzQsImV4cCI6MjA5MTk4NDYzNH0.ZxwsWtzzKO_nUSMQpH-FpbA2-5nYH8Nu1IegcKcYjW8';
 const PHOTO_BUCKET  = 'inventory-photos';
@@ -1487,11 +1516,13 @@ function applyRoleUI() {
   if (sendDeliveryTabBtn) sendDeliveryTabBtn.style.display = warehouse ? '' : 'none';
   const orderReceiveTabBtn = document.getElementById('tabBtnOrderReceive');
   if (orderReceiveTabBtn) orderReceiveTabBtn.style.display = warehouse ? '' : 'none';
+  const siteStockCountTabBtn = document.getElementById('tabBtnSiteStockCount');
+  if (siteStockCountTabBtn) siteStockCountTabBtn.style.display = warehouse ? '' : 'none';
   // Hide hotel-staff tabs for the warehouse role — James doesn't issue items,
   // run stock counts, or browse a per-hotel transaction history.
   const allTabBtns = document.querySelectorAll('.tab-bar > .tab-btn');
   const hideForWarehouse = ['Issue', 'Count', 'History'];
-  const fullTabOrder = ['Issue','Stock','Count','History','Dashboard','Reports','OrderReceive','SendDelivery'];
+  const fullTabOrder = ['Issue','Stock','Count','History','Dashboard','Reports','OrderReceive','SendDelivery','SiteStockCount'];
   fullTabOrder.forEach((nm, i) => {
     if (!allTabBtns[i]) return;
     if (hideForWarehouse.includes(nm)) {
@@ -1912,7 +1943,7 @@ function switchTab(name) {
   document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('page' + name).classList.add('active');
-  const tabOrder = ['Issue','Stock','Count','History','Dashboard','Reports','OrderReceive','SendDelivery'];
+  const tabOrder = ['Issue','Stock','Count','History','Dashboard','Reports','OrderReceive','SendDelivery','SiteStockCount'];
   const idx = tabOrder.indexOf(name);
   const allTabs = document.querySelectorAll('.tab-btn');
   if (idx >= 0 && allTabs[idx]) allTabs[idx].classList.add('active');
@@ -1924,7 +1955,8 @@ function switchTab(name) {
   if (name === 'Dashboard') renderDashboard();
   if (name === 'Reports') { initReports(); renderArchive(); }
   if (name === 'OrderReceive') loadRecentReceipts();
-  if (name === 'SendDelivery') loadSendDeliveryTab();
+  if (name === 'SendDelivery')     loadSendDeliveryTab();
+  if (name === 'SiteStockCount')  loadSiteStockCountTab();
 }
 
 /* =================================================================
@@ -4253,6 +4285,268 @@ function _pdfFooter(doc, data) {
   doc.text(`Page ${data.pageNumber} of ${pageCount}`, pageSize.width - 80, pageHeight - 20);
   doc.text(`SOS Property Inventory`, 40, pageHeight - 20);
   doc.setTextColor(0);
+}
+
+/* =================================================================
+   SITE STOCK COUNT TAB — warehouse view of all sites' submissions
+   ================================================================= */
+const SSC_HOTEL_MAP = {
+  HIWEMBLEY: { abbr: 'HIW', name: 'Holiday Inn Wembley' },
+  BWWEMBLEY: { abbr: 'BWW', name: 'Best Western Wembley' },
+  WAREHOUSE: { abbr: 'WH',  name: 'Warehouse' }
+};
+
+let _sscAllRows    = [];   // all fetched submissions (unfiltered)
+let _sscFilter     = 'all';
+
+function sscSetFilter(val) {
+  _sscFilter = val;
+  document.querySelectorAll('#sscFilterRow .cat-pill').forEach(b => b.classList.remove('active'));
+  const map = { all:'sscFilterAll', HIWEMBLEY:'sscFilterHIW', BWWEMBLEY:'sscFilterBWW' };
+  const btn = document.getElementById(map[val] || 'sscFilterAll');
+  if (btn) btn.classList.add('active');
+  renderSiteStockCountTab(_sscAllRows);
+}
+
+async function loadSiteStockCountTab() {
+  const container = document.getElementById('siteStockCountContent');
+  if (!container) return;
+  container.innerHTML = `<div class="card" style="text-align:center; padding:24px; color:var(--text-light);">
+    <span class="spinner" style="border-color:rgba(229,62,62,0.25); border-top-color:#e53e3e; width:22px; height:22px;"></span>
+    <div style="margin-top:10px; font-size:0.85rem;">Loading site stock counts…</div>
+  </div>`;
+
+  // Warehouse bypasses RLS so this returns ALL hotels' submissions
+  const { data, error } = await sb
+    .from('stock_counts')
+    .select('id, submitted_at, submitted_by, status, counts, summary, hotel_id')
+    .order('submitted_at', { ascending: false })
+    .limit(120);
+
+  if (error) {
+    container.innerHTML = `<div class="card" style="color:var(--danger); padding:16px;">
+      Could not load stock counts: ${error.message}</div>`;
+    return;
+  }
+
+  _sscAllRows = data || [];
+  renderSiteStockCountTab(_sscAllRows);
+}
+
+function renderSiteStockCountTab(rows) {
+  const container = document.getElementById('siteStockCountContent');
+  if (!container) return;
+
+  // Apply hotel filter
+  const filtered = _sscFilter === 'all'
+    ? rows
+    : rows.filter(r => r.hotel_id === _sscFilter ||
+        (ALL_HOTELS.find(h => h.id === r.hotel_id) || {}).code === _sscFilter);
+
+  if (!filtered.length) {
+    container.innerHTML = `<div class="card" style="text-align:center; color:var(--text-light); padding:28px;">
+      No stock count submissions found${_sscFilter !== 'all' ? ' for this site' : ''}.</div>`;
+    return;
+  }
+
+  // Group by ISO week (Mon–Sun) so Friday submissions appear together
+  const grouped = {};
+  filtered.forEach(r => {
+    const d   = new Date(r.submitted_at);
+    // Find the preceding Monday for grouping
+    const mon = new Date(d);
+    mon.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    const wk  = mon.toISOString().slice(0, 10);
+    if (!grouped[wk]) grouped[wk] = [];
+    grouped[wk].push(r);
+  });
+
+  const hotelLookup = {}; // hotel_id → { code, name }
+  (ALL_HOTELS || []).forEach(h => { hotelLookup[h.id] = h; });
+
+  let html = '';
+  Object.keys(grouped).sort((a, b) => b.localeCompare(a)).forEach(wk => {
+    const weekRows = grouped[wk];
+    const wkDate  = new Date(wk);
+    const fri     = new Date(wk); fri.setDate(wkDate.getDate() + 4);
+    const wkLabel = `Week of ${wkDate.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})} (Fri ${fri.toLocaleDateString('en-GB',{day:'2-digit',month:'short'})})`;
+
+    html += `<div style="font-size:0.72rem; font-weight:700; color:var(--text-light);
+      text-transform:uppercase; letter-spacing:0.07em;
+      padding:6px 4px 4px; margin-top:10px;">${wkLabel}</div>`;
+
+    weekRows.forEach(r => {
+      const hotel     = hotelLookup[r.hotel_id] || {};
+      const hotelCode = hotel.code || 'UNKNOWN';
+      const hotelName = hotel.name || hotelCode;
+      const meta      = SSC_HOTEL_MAP[hotelCode] || { abbr: hotelCode.slice(0,4), name: hotelName };
+      const dt        = new Date(r.submitted_at);
+      const dd        = String(dt.getDate()).padStart(2,'0');
+      const mm        = String(dt.getMonth()+1).padStart(2,'0');
+      const yyyy      = dt.getFullYear();
+      const ref       = `SC-${meta.abbr}-${dd}${mm}${yyyy}`;
+      const timeStr   = dt.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+      const dateStr   = dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+      const itemCount = (r.counts || []).length;
+      const acc       = r.summary && r.summary.accuracyPct != null
+                        ? Number(r.summary.accuracyPct).toFixed(1) + '%' : '—';
+      const statusCls = r.status === 'applied'  ? 'badge-success'
+                      : r.status === 'pending'   ? 'badge-warning'
+                      : 'badge-info';
+      const statusLbl = r.status === 'applied'   ? 'Applied'
+                      : r.status === 'pending'    ? 'Pending'
+                      : (r.status || 'Unknown');
+
+      // Colour band per hotel
+      const bandColor = hotelCode === 'HIWEMBLEY' ? '#3182ce'
+                      : hotelCode === 'BWWEMBLEY' ? '#38a169'
+                      : '#718096';
+
+      html += `
+        <div class="card" style="padding:14px 14px 12px; margin-bottom:8px; border-left:4px solid ${bandColor};">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+            <div>
+              <div style="font-weight:700; font-size:0.9rem; letter-spacing:-0.01em;">${ref}</div>
+              <div style="font-size:0.75rem; color:var(--text-light); margin-top:2px;">${hotelName}</div>
+            </div>
+            <span class="badge ${statusCls}">${statusLbl}</span>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-bottom:10px;">
+            <div style="background:var(--bg); border-radius:8px; padding:6px 8px; text-align:center;">
+              <div style="font-size:1rem; font-weight:800; color:var(--text);">${itemCount}</div>
+              <div style="font-size:0.62rem; color:var(--text-light); text-transform:uppercase; letter-spacing:0.05em; margin-top:1px;">Items</div>
+            </div>
+            <div style="background:var(--bg); border-radius:8px; padding:6px 8px; text-align:center;">
+              <div style="font-size:1rem; font-weight:800; color:${acc !== '—' && parseFloat(acc) >= 95 ? '#38a169' : '#d69e2e'};">${acc}</div>
+              <div style="font-size:0.62rem; color:var(--text-light); text-transform:uppercase; letter-spacing:0.05em; margin-top:1px;">Accuracy</div>
+            </div>
+            <div style="background:var(--bg); border-radius:8px; padding:6px 8px; text-align:center;">
+              <div style="font-size:0.7rem; font-weight:700; color:var(--text);">${dateStr}</div>
+              <div style="font-size:0.62rem; color:var(--text-light); margin-top:1px;">${timeStr}</div>
+            </div>
+          </div>
+          <div style="font-size:0.72rem; color:var(--text-light); margin-bottom:8px;">
+            Submitted by <strong>${r.submitted_by || 'unknown'}</strong>
+          </div>
+          <button class="btn btn-primary btn-block" onclick="viewSiteStockCountPDF('${r.id}')"
+                  style="padding:9px; font-size:0.82rem; gap:6px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            View ${ref}
+          </button>
+        </div>`;
+    });
+  });
+
+  container.innerHTML = html;
+}
+
+async function viewSiteStockCountPDF(submissionId) {
+  // Find from cached rows first; fall back to a fresh fetch
+  let row = _sscAllRows.find(r => r.id === submissionId);
+  if (!row) {
+    const { data } = await sb.from('stock_counts')
+      .select('id, submitted_at, submitted_by, status, counts, summary, hotel_id')
+      .eq('id', submissionId).maybeSingle();
+    row = data;
+  }
+  if (!row) { toast('Submission not found', 'error'); return; }
+
+  const hotelLookup = {};
+  (ALL_HOTELS || []).forEach(h => { hotelLookup[h.id] = h; });
+  const hotel     = hotelLookup[row.hotel_id] || {};
+  const hotelCode = hotel.code || 'UNKNOWN';
+  const hotelName = hotel.name || hotelCode;
+  const meta      = SSC_HOTEL_MAP[hotelCode] || { abbr: hotelCode.slice(0,4), name: hotelName };
+
+  const dt   = new Date(row.submitted_at);
+  const dd   = String(dt.getDate()).padStart(2,'0');
+  const mm   = String(dt.getMonth()+1).padStart(2,'0');
+  const yyyy = dt.getFullYear();
+  const ref  = `SC-${meta.abbr}-${dd}${mm}${yyyy}`;
+  const generatedAt = new Date().toLocaleString('en-GB',{
+    day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'
+  });
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+
+  // Coloured header band
+  doc.setFillColor(229, 62, 62);
+  doc.rect(0, 0, doc.internal.pageSize.width, 54, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(16);
+  doc.setFont(undefined, 'bold');
+  doc.text(`${hotelName} — Stock Count`, 40, 30);
+  doc.setFontSize(9);
+  doc.setFont(undefined, 'normal');
+  doc.text(`Ref: ${ref}     Submitted: ${dt.toLocaleString('en-GB')}     Generated: ${generatedAt}`, 40, 44);
+  doc.setTextColor(0);
+
+  // Summary KPIs
+  const s         = row.summary || {};
+  const accuracy  = s.accuracyPct != null ? Number(s.accuracyPct).toFixed(1) + '%' : '—';
+  const itemCount = (row.counts || []).length;
+  const okCount   = s.okCount   || 0;
+  const surCount  = s.surplusCount || 0;
+  const shortCount= s.shortCount   || 0;
+  doc.setFontSize(10);
+  doc.setTextColor(60);
+  doc.text(
+    `Items counted: ${itemCount}    Accuracy: ${accuracy}    OK: ${okCount}    Surplus: ${surCount}    Short: ${shortCount}    Submitted by: ${row.submitted_by || '—'}`,
+    40, 72
+  );
+  doc.setTextColor(0);
+
+  const counts = (row.counts || []).sort((a, b) => {
+    const c = (a.category || '').localeCompare(b.category || '');
+    return c !== 0 ? c : (a.name || '').localeCompare(b.name || '');
+  });
+
+  const body = counts.map(c => {
+    const sys = Number(c.system) || 0;
+    const act = Number(c.actual) || 0;
+    const vari= Number(c.variance) || 0;
+    const pct = sys > 0 ? ((vari / sys) * 100).toFixed(1) + '%' : '—';
+    return [
+      c.category || '—',
+      c.name     || '—',
+      c.unit     || '—',
+      String(sys),
+      String(act),
+      (vari > 0 ? '+' : '') + vari,
+      pct
+    ];
+  });
+
+  doc.autoTable({
+    startY: 88,
+    head: [['Category', 'Item', 'Unit', 'System Qty', 'Actual Qty', 'Variance', 'Var %']],
+    body,
+    styles:      { fontSize: 8, cellPadding: 3 },
+    headStyles:  { fillColor: [229, 62, 62], fontStyle: 'bold' },
+    columnStyles: {
+      0: { cellWidth: 85 },
+      1: { cellWidth: 175 },
+      2: { cellWidth: 45 },
+      3: { cellWidth: 65, halign: 'center' },
+      4: { cellWidth: 65, halign: 'center' },
+      5: { cellWidth: 60, halign: 'center' },
+      6: { cellWidth: 55, halign: 'center' }
+    },
+    didParseCell: (data) => {
+      if (data.section === 'body' && data.column.index === 5) {
+        const v = String(data.cell.raw);
+        if (v !== '0') {
+          data.cell.styles.textColor = v.startsWith('-') ? [197,48,48] : [56,161,105];
+          data.cell.styles.fontStyle = 'bold';
+        }
+      }
+    },
+    didDrawPage: (data) => _pdfFooter(doc, data)
+  });
+
+  toast(`Building ${ref}.pdf…`, 'info', 1500);
+  previewPDF(doc, `${ref}.pdf`);
 }
 
 /* ------------------------------------------------------------------
