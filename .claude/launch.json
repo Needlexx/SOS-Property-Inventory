@@ -3,7 +3,7 @@
   "configurations": [
     {
       "name": "generic-inventory",
-      "runtimeExecutable": "python",
+      "runtimeExecutable": "python3",
       "runtimeArgs": ["-c", "import os,http.server,socketserver; PORT=int(os.environ.get('PORT','8000')); socketserver.TCPServer(('',PORT), http.server.SimpleHTTPRequestHandler).serve_forever()"],
       "autoPort": true
     }

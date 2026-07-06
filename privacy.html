@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Privacy Policy — SOS Property Inventory</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --primary: #e53e3e;
+    --primary-dark: #c53030;
+    --bg: #f7f7f8;
+    --card-bg: #ffffff;
+    --text: #1a202c;
+    --text-muted: #4a5568;
+    --text-light: #718096;
+    --border: #e2e8f0;
+    --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    letter-spacing: -0.01em;
+    line-height: 1.6;
+  }
+  header {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+    color: #fff;
+    padding: 48px 20px 36px;
+    text-align: center;
+  }
+  header img { width: 56px; height: 56px; border-radius: 14px; margin-bottom: 14px; }
+  header h1 { margin: 0 0 6px; font-size: 1.6rem; font-weight: 800; }
+  header p { margin: 0; opacity: 0.9; font-size: 0.95rem; }
+  main {
+    max-width: 720px;
+    margin: -20px auto 60px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 36px clamp(20px, 5vw, 44px);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.06);
+  }
+  h2 { font-size: 1.15rem; font-weight: 700; margin: 32px 0 10px; }
+  h2:first-child { margin-top: 0; }
+  p, li { color: var(--text-muted); font-size: 0.96rem; }
+  ul { padding-left: 20px; margin: 8px 0; }
+  li { margin-bottom: 6px; }
+  a { color: var(--primary); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .updated { color: var(--text-light); font-size: 0.85rem; margin-top: -4px; }
+  .back { display: inline-block; margin: 24px auto 0; text-align: center; width: 100%; }
+</style>
+</head>
+<body>
+<header>
+  <img src="icons/icon-192.png" alt="SOS Property Inventory">
+  <h1>Privacy Policy</h1>
+  <p>SOS Property Inventory</p>
+</header>
+<main>
+  <p class="updated">Last updated: July 6, 2026</p>
+
+  <h2>Overview</h2>
+  <p>SOS Property Inventory ("the App") is an internal operational tool used by SOS Property staff to manage inventory, stock, and deliveries across hotel and warehouse sites. The App is not directed at the general public or guests, and access is limited to authorized staff accounts.</p>
+
+  <h2>Information We Collect</h2>
+  <p>We collect the following information from staff members who use the App:</p>
+  <ul>
+    <li><strong>Account information:</strong> your work email address and password, used to sign in via our authentication provider (Supabase). Passwords are hashed and never stored in plain text.</li>
+    <li><strong>Role and site assignment:</strong> your staff role and the hotel/warehouse site(s) you are assigned to.</li>
+    <li><strong>Login activity:</strong> timestamp, assigned site, role, and device/browser type each time you sign in, so managers can review account activity.</li>
+    <li><strong>Inventory data you enter:</strong> item names, product codes, quantities, stock counts, delivery records, and transaction history tied to your site — this is operational data, not personal data about guests or customers.</li>
+    <li><strong>Photos:</strong> if you choose to attach a photo (via camera or photo library) to an inventory item or issue report, that photo is uploaded and stored to document the record.</li>
+    <li><strong>Locally cached data:</strong> the App stores some data on your device (browser local storage) to allow the App to work offline and load faster. This local data stays on your device and is not sent anywhere beyond normal sync with our backend.</li>
+  </ul>
+
+  <h2>How We Use This Information</h2>
+  <ul>
+    <li>To authenticate staff and control access to the correct hotel/warehouse site's data.</li>
+    <li>To maintain accurate, up-to-date inventory and delivery records.</li>
+    <li>To let managers verify that staff accounts are active and being used appropriately.</li>
+    <li>To generate reports and exports (e.g. PDF or spreadsheet exports) requested by authorized staff.</li>
+  </ul>
+
+  <h2>Data Storage and Third Parties</h2>
+  <p>Data is stored and processed using <a href="https://supabase.com" target="_blank" rel="noopener">Supabase</a>, a backend infrastructure provider, over encrypted (HTTPS) connections. The App also loads a small number of third-party code libraries from public content delivery networks (jsDelivr, SheetJS, Google Fonts) needed to render charts, generate PDFs/spreadsheets, and display fonts. These providers only serve static files to your device and do not receive your inventory or account data.</p>
+  <p>We do not use advertising networks, analytics/tracking scripts, or sell any data to third parties.</p>
+
+  <h2>Data Retention and Deletion</h2>
+  <p>Account and inventory data is retained for as long as your staff account is active, to preserve operational and audit history. If you would like your account data deleted or have questions about data we hold, contact us using the details below.</p>
+
+  <h2>Children's Privacy</h2>
+  <p>The App is an internal staff tool and is not intended for use by children. We do not knowingly collect information from children.</p>
+
+  <h2>Changes to This Policy</h2>
+  <p>We may update this policy from time to time. Changes will be posted on this page with an updated "Last updated" date.</p>
+
+  <h2>Contact Us</h2>
+  <p>If you have questions about this privacy policy or your data, contact us at <a href="mailto:james.ward@sosproperty.co.uk">james.ward@sosproperty.co.uk</a>.</p>
+
+  <p class="back"><a href="./">&larr; Back to SOS Property Inventory</a></p>
+</main>
+</body>
+</html>

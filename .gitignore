@@ -1,0 +1,28 @@
+# Node
+node_modules/
+npm-debug.log
+
+# Capacitor web build output (generated from index.html via `cp` into www/)
+# keep www/ tracked since it's the Capacitor webDir, but ignore stray build caches
+
+# iOS
+ios/App/Pods/
+ios/App/build/
+ios/App/build_sim/
+ios/App/DerivedData/
+ios/**/*.xcuserstate
+ios/**/xcuserdata/
+ios/App/App/public/
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/app/src/main/assets/public/
+*.keystore
+*.jks
+
+# macOS
+.DS_Store
