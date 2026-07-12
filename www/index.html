@@ -1024,6 +1024,90 @@ select.form-control {
   color: var(--text-light); text-transform: uppercase;
   letter-spacing: 0.1em; margin: 10px 2px 8px;
 }
+
+/* =================================================================
+   DESKTOP WEBSITE LAYOUT
+   Only applies above 1024px — phones, the installed PWA, and the
+   native app wrapper are always narrower than this and keep the
+   mobile bottom-tab-bar layout above untouched. This block turns the
+   bottom tab bar into a persistent left sidebar and gives the whole
+   app more Apple-style breathing room, using the same red brand
+   colors as the mobile app.
+   ================================================================= */
+@media (min-width: 1024px) {
+  :root { --header-height: 68px; --sidebar-width: 260px; }
+
+  body { padding-bottom: 0; }
+
+  /* ---- Header: slimmer content column, larger wordmark ---- */
+  .app-header { padding: 0 28px; }
+  .header-logo { width: 42px; height: 42px; border-radius: 12px; }
+  .header-logo svg { width: 22px; height: 22px; }
+  .header-left h1 { font-size: 1.2rem; }
+  .header-left h1 .header-sub { font-size: 0.66rem; }
+
+  /* ---- Sidebar (replaces bottom tab bar) ---- */
+  .tab-bar {
+    position: fixed;
+    top: var(--header-height); left: 0; bottom: 0; right: auto;
+    width: var(--sidebar-width); height: auto;
+    flex-direction: column; align-items: stretch;
+    gap: 3px;
+    background: #fbfbfc;
+    border-top: none;
+    border-right: 1px solid var(--border);
+    box-shadow: none;
+    padding: 20px 14px;
+    overflow-y: auto;
+  }
+  .tab-btn {
+    flex: none;
+    flex-direction: row;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 12px;
+    padding: 11px 14px;
+    font-size: 0.875rem;
+    border-radius: var(--radius-sm);
+    text-align: left;
+  }
+  .tab-btn svg { width: 19px; height: 19px; flex-shrink: 0; }
+  .tab-btn:hover { background: var(--divider); color: var(--text-muted); }
+  .tab-btn.active:hover { background: #fff5f5; }
+  .tab-btn.active svg { transform: none; }
+  .tab-btn .tab-badge {
+    position: static;
+    margin-left: auto;
+  }
+
+  /* ---- Main content: clear the sidebar, add generous whitespace ---- */
+  main {
+    margin-left: var(--sidebar-width);
+    max-width: none;
+    padding: 40px 48px 56px;
+  }
+  .tab-page { max-width: 900px; margin: 0 auto; }
+
+  /* ---- Refined typography + component scale ---- */
+  .card { padding: 24px 26px; border-radius: var(--radius-lg); }
+  .btn { padding: 12px 22px; font-size: 0.92rem; }
+  .form-control { padding: 12px 16px; }
+  .stat-value { font-size: 2.1rem; }
+  h2, h3 { letter-spacing: -0.025em; }
+
+  /* ---- Modals read as centered dialogs, not mobile bottom sheets ---- */
+  .modal-overlay { align-items: center; padding: 24px; }
+  .modal-content {
+    border-radius: 20px;
+    max-width: 560px;
+    max-height: 85vh;
+    animation: dialogIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes dialogIn {
+    from { opacity: 0; transform: translateY(8px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+}
 </style>
 </head>
 <body>

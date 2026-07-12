@@ -23,6 +23,7 @@ android/.idea/
 android/app/src/main/assets/public/
 *.keystore
 *.jks
+resources/cert-request/
 
 # macOS
 .DS_Store
